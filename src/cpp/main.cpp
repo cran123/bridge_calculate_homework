@@ -12,6 +12,7 @@
 #include "Bar.h"
 #include "Outputter.h"
 #include "Clock.h"
+#include "VTKOutputter.h"
 
 using namespace std;
 
@@ -102,6 +103,9 @@ int main(int argc, char *argv[])
 
 //      Calculate and output stresses of all elements
         Output->OutputElementStress();
+
+        string VTKFile = filename + "_lc" + to_string(lcase + 1) + ".vtu";
+        CVTKOutputter::WriteVTU(VTKFile, lcase + 1);
     }
 
     double time_solution = timer.ElapsedTime();
