@@ -14,6 +14,7 @@
 
 #include "Element.h"
 #include "Bar.h"
+#include "Plate4.h"
 #include "Material.h"
 #include "Node.h"
 

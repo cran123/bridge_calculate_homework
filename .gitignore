@@ -2,3 +2,4 @@ build/
 src/out
 .vscode
 data/
+tests

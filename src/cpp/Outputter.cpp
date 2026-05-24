@@ -145,11 +145,11 @@ void COutputter::OutputElementInfo()
 		ElementTypes ElementType = FEMData->GetEleGrpList()[EleGrp].GetElementType();
 		unsigned int NUME = FEMData->GetEleGrpList()[EleGrp].GetNUME();
 
-		*this << " ELEMENT TYPE  . . . . . . . . . . . . .( NPAR(1) ) . . =" << setw(5)
+	*this << " ELEMENT TYPE  . . . . . . . . . . . . .( NPAR(1) ) . . =" << setw(5)
 			  << ElementType << endl;
 		*this << "     EQ.1, TRUSS ELEMENTS" << endl
-			  << "     EQ.2, ELEMENTS CURRENTLY" << endl
-			  << "     EQ.3, NOT AVAILABLE" << endl
+			  << "     EQ.6, FOUR-NODE ENGINEERING S4R PLATE/SHELL ELEMENTS" << endl
+			  << "     OTHER TYPES, NOT AVAILABLE" << endl
 			  << endl;
 
 		*this << " NUMBER OF ELEMENTS. . . . . . . . . . .( NPAR(2) ) . . =" << setw(5) << NUME
@@ -160,6 +160,9 @@ void COutputter::OutputElementInfo()
 		{
 			case ElementTypes::Bar: // Bar element
 				OutputBarElements(EleGrp);
+				break;
+			case ElementTypes::Plate:
+				OutputPlateElements(EleGrp);
 				break;
 		    default:
 		        *this << ElementType << " has not been implemented yet." << endl;
@@ -204,6 +207,50 @@ void COutputter::OutputBarElements(unsigned int EleGrp)
 	unsigned int NUME = ElementGroup.GetNUME();
 
 	//	Loop over for all elements in group EleGrp
+	for (unsigned int Ele = 0; Ele < NUME; Ele++)
+    {
+        *this << setw(5) << Ele+1;
+		ElementGroup[Ele].Write(*this);
+    }
+
+	*this << endl;
+}
+
+//	Output plate element data
+void COutputter::OutputPlateElements(unsigned int EleGrp)
+{
+	CDomain* FEMData = CDomain::GetInstance();
+
+	CElementGroup& ElementGroup = FEMData->GetEleGrpList()[EleGrp];
+	unsigned int NUMMAT = ElementGroup.GetNUMMAT();
+
+	*this << " M A T E R I A L   D E F I N I T I O N" << endl
+		  << endl;
+	*this << " NUMBER OF DIFFERENT SETS OF MATERIAL" << endl;
+	*this << " AND PLATE/SHELL CONSTANTS . . . . . . .( NPAR(3) ) . . =" << setw(5) << NUMMAT
+		  << endl
+		  << endl;
+
+	*this << "  SET       YOUNG'S        POISSON      THICKNESS       DENSITY" << endl
+		  << " NUMBER     MODULUS         RATIO" << endl
+		  << "               E             NU             T            RHO" << endl;
+
+	*this << setiosflags(ios::scientific) << setprecision(5);
+
+	for (unsigned int mset = 0; mset < NUMMAT; mset++)
+    {
+        *this << setw(5) << mset+1;
+		ElementGroup.GetMaterial(mset).Write(*this);
+    }
+
+	*this << endl << endl
+		  << " E L E M E N T   I N F O R M A T I O N" << endl;
+
+	*this << " ELEMENT     NODE     NODE     NODE     NODE       MATERIAL" << endl
+		  << " NUMBER-N      I        J        K        L       SET NUMBER" << endl;
+
+	unsigned int NUME = ElementGroup.GetNUME();
+
 	for (unsigned int Ele = 0; Ele < NUME; Ele++)
     {
         *this << setw(5) << Ele+1;
