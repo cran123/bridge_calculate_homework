@@ -96,7 +96,7 @@ void COutputter::OutputNodeInfo()
 		  << endl;
 
 	*this << " N O D A L   P O I N T   D A T A" << endl << endl;
-	*this << "    NODE       BOUNDARY                         NODAL POINT" << endl
+	*this << "    NODE              BOUNDARY                         NODAL POINT" << endl
 		  << "   NUMBER  CONDITION  CODES                     COORDINATES" << endl;
 
 	for (unsigned int np = 0; np < NUMNP; np++)
@@ -116,7 +116,7 @@ void COutputter::OutputEquationNumber()
 	*this << " EQUATION NUMBERS" << endl
 		  << endl;
 	*this << "   NODE NUMBER   DEGREES OF FREEDOM" << endl;
-	*this << "        N           X    Y    Z" << endl;
+	*this << "        N          UX   UY   UZ   RX   RY   RZ" << endl;
 
 	for (unsigned int np = 0; np < NUMNP; np++) // Loop over for all node
 		NodeList[np].WriteEquationNo(*this);
@@ -249,7 +249,8 @@ void COutputter::OutputNodalDisplacement()
 
 	*this << " D I S P L A C E M E N T S" << endl
 		  << endl;
-	*this << "  NODE           X-DISPLACEMENT    Y-DISPLACEMENT    Z-DISPLACEMENT" << endl;
+	*this << "  NODE           UX-DISPLACEMENT   UY-DISPLACEMENT   UZ-DISPLACEMENT"
+		  << "   RX-ROTATION       RY-ROTATION       RZ-ROTATION" << endl;
 
 	for (unsigned int np = 0; np < FEMData->GetNUMNP(); np++)
 		NodeList[np].WriteNodalDisplacement(*this, Displacement);
