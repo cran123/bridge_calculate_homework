@@ -346,6 +346,12 @@ void COutputter::OutputElementStress()
 
 				break;
 
+			case ElementTypes::Plate:
+				*this << "  ELEMENT         SXX        SYY        SXY         MX         MY        MXY      MISES" << endl
+					  << "  NUMBER      STRESS OUTPUT WILL BE ADDED IN A LATER STEP" << endl
+					  << endl;
+				break;
+
 			default: // Invalid element type
 				cerr << "*** Error *** Elment type " << ElementType
 					<< " has not been implemented.\n\n";
