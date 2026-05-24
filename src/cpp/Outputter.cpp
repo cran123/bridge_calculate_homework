@@ -347,10 +347,27 @@ void COutputter::OutputElementStress()
 				break;
 
 			case ElementTypes::Plate:
-				*this << "  ELEMENT         SXX        SYY        SXY         MX         MY        MXY      MISES" << endl
-					  << "  NUMBER      STRESS OUTPUT WILL BE ADDED IN A LATER STEP" << endl
-					  << endl;
+			{
+				*this << "  ELEMENT             SXX             SYY             SXY"
+					  << "              MX              MY             MXY           MISES" << endl
+					  << "  NUMBER" << endl;
+
+				double stress[7];
+
+				for (unsigned int Ele = 0; Ele < NUME; Ele++)
+				{
+					CElement& Element = EleGrp[Ele];
+					Element.ElementStress(stress, Displacement);
+
+					*this << setw(5) << Ele + 1;
+					for (unsigned int i = 0; i < 7; i++)
+						*this << setw(16) << stress[i];
+					*this << endl;
+				}
+
+				*this << endl;
 				break;
+			}
 
 			default: // Invalid element type
 				cerr << "*** Error *** Elment type " << ElementType

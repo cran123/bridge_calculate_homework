@@ -109,6 +109,35 @@ namespace
 		return TriangleArea(nodes[0], nodes[1], nodes[2])
 			 + TriangleArea(nodes[0], nodes[2], nodes[3]);
 	}
+
+	void PlateMaterialMatrices(CPlateMaterial* material, double Dm[3][3], double Db[3][3])
+	{
+		const double E = material->E;
+		const double nu = material->Nu;
+		const double t = material->Thickness;
+		const double membraneFactor = E / (1.0 - nu * nu);
+		const double bendingFactor = E * t * t * t / (12.0 * (1.0 - nu * nu));
+
+		Dm[0][0] = membraneFactor;
+		Dm[0][1] = membraneFactor * nu;
+		Dm[0][2] = 0.0;
+		Dm[1][0] = membraneFactor * nu;
+		Dm[1][1] = membraneFactor;
+		Dm[1][2] = 0.0;
+		Dm[2][0] = 0.0;
+		Dm[2][1] = 0.0;
+		Dm[2][2] = membraneFactor * (1.0 - nu) * 0.5;
+
+		Db[0][0] = bendingFactor;
+		Db[0][1] = bendingFactor * nu;
+		Db[0][2] = 0.0;
+		Db[1][0] = bendingFactor * nu;
+		Db[1][1] = bendingFactor;
+		Db[1][2] = 0.0;
+		Db[2][0] = 0.0;
+		Db[2][1] = 0.0;
+		Db[2][2] = bendingFactor * (1.0 - nu) * 0.5;
+	}
 }
 
 //	Read plate material data from stream Input
@@ -302,6 +331,53 @@ void CPlate4::ElementStiffness(double* Matrix)
 void CPlate4::ElementStress(double* stress, double* Displacement)
 {
 	clear(stress, 7);
+
+	CPlateMaterial* material = dynamic_cast<CPlateMaterial*>(ElementMaterial_);
+
+	double N[4], dNdx[4], dNdy[4], detJ;
+	if (!ShapeDerivativeXY(nodes_, 0.0, 0.0, N, dNdx, dNdy, detJ))
+	{
+		cerr << "*** Error *** Invalid Plate4 element Jacobian." << endl;
+		return;
+	}
+
+	double membraneStrain[3] = {0.0, 0.0, 0.0};
+	double curvature[3] = {0.0, 0.0, 0.0};
+
+	for (unsigned int a = 0; a < 4; a++)
+	{
+		double u[6] = {};
+		for (unsigned int d = 0; d < 6; d++)
+		{
+			unsigned int equation = nodes_[a]->bcode[d];
+			if (equation)
+				u[d] = Displacement[equation - 1];
+		}
+
+		membraneStrain[0] += dNdx[a] * u[0];
+		membraneStrain[1] += dNdy[a] * u[1];
+		membraneStrain[2] += dNdy[a] * u[0] + dNdx[a] * u[1];
+
+		curvature[0] += dNdx[a] * u[4];
+		curvature[1] += dNdy[a] * u[3];
+		curvature[2] += dNdx[a] * u[3] + dNdy[a] * u[4];
+	}
+
+	double Dm[3][3];
+	double Db[3][3];
+	PlateMaterialMatrices(material, Dm, Db);
+
+	for (unsigned int i = 0; i < 3; i++)
+	{
+		for (unsigned int j = 0; j < 3; j++)
+		{
+			stress[i] += Dm[i][j] * membraneStrain[j];
+			stress[i + 3] += Db[i][j] * curvature[j];
+		}
+	}
+
+	stress[6] = sqrt(stress[0] * stress[0] - stress[0] * stress[1]
+				   + stress[1] * stress[1] + 3.0 * stress[2] * stress[2]);
 }
 
 //	Calculate equivalent nodal body force
