@@ -93,6 +93,22 @@ namespace
 		if (row != col)
 			full[col][row] += value;
 	}
+
+	double TriangleArea(const CNode* a, const CNode* b, const CNode* c)
+	{
+		const double x1 = b->XYZ[0] - a->XYZ[0];
+		const double y1 = b->XYZ[1] - a->XYZ[1];
+		const double x2 = c->XYZ[0] - a->XYZ[0];
+		const double y2 = c->XYZ[1] - a->XYZ[1];
+
+		return 0.5 * fabs(x1 * y2 - y1 * x2);
+	}
+
+	double PlateArea(CNode** nodes)
+	{
+		return TriangleArea(nodes[0], nodes[1], nodes[2])
+			 + TriangleArea(nodes[0], nodes[2], nodes[3]);
+	}
 }
 
 //	Read plate material data from stream Input
@@ -286,4 +302,22 @@ void CPlate4::ElementStiffness(double* Matrix)
 void CPlate4::ElementStress(double* stress, double* Displacement)
 {
 	clear(stress, 7);
+}
+
+//	Calculate equivalent nodal body force
+void CPlate4::ElementBodyForce(double* bodyForce, const double gravity[3])
+{
+	clear(bodyForce, ND_);
+
+	CPlateMaterial* material = dynamic_cast<CPlateMaterial*>(ElementMaterial_);
+	const double area = PlateArea(nodes_);
+	const double nodalMass = material->Density * material->Thickness * area / 4.0;
+
+	for (unsigned int a = 0; a < 4; a++)
+	{
+		const unsigned int base = 6 * a;
+		bodyForce[base + 0] = nodalMass * gravity[0];
+		bodyForce[base + 1] = nodalMass * gravity[1];
+		bodyForce[base + 2] = nodalMass * gravity[2];
+	}
 }

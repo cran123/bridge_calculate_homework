@@ -23,10 +23,12 @@ public:
 	unsigned int* node;		//!< Node number to which this load is applied
 	unsigned int* dof;		//!< Degree of freedom number for this load component
 	double* load;			//!< Magnitude of load
+	bool hasGravity;		//!< Whether gravity load is applied
+	double gravity[3];		//!< Gravity acceleration vector
 
 public:
 
-	CLoadCaseData() : nloads(0), node(NULL), dof(NULL), load(NULL) {};
+	CLoadCaseData() : nloads(0), node(NULL), dof(NULL), load(NULL), hasGravity(false), gravity{0.0, 0.0, 0.0} {};
 	~CLoadCaseData();
 
 //!	Set nloads, and new array node, dof and load

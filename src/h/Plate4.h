@@ -57,4 +57,7 @@ public:
 
 //!	Calculate element stress
 	virtual void ElementStress(double* stress, double* Displacement);
+
+//!	Calculate equivalent nodal body force
+	virtual void ElementBodyForce(double* bodyForce, const double gravity[3]);
 };
