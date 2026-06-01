@@ -14,16 +14,16 @@
 
 using namespace std;
 
-//! Bar element class
-class CBar : public CElement
+//! Hexahedral 8-node solid element
+class CHex8 : public CElement
 {
 public:
 
 //!	Constructor
-	CBar();
+	CHex8();
 
 //!	Desconstructor
-	~CBar();
+	~CHex8();
 
 //!	Read element data from stream Input
 	virtual bool Read(ifstream& Input, CMaterial* MaterialSets, CNode* NodeList);
@@ -34,7 +34,7 @@ public:
 //!	Calculate element stiffness matrix
 	virtual void ElementStiffness(double* Matrix);
 
-//!	Calculate element stress
+//!	Calculate element stress (Sxx, Syy, Szz, Sxy, Syz, Sxz)
 	virtual void ElementStress(double* stress, double* Displacement);
 
 //!	Calculate element body force vector (self-weight)

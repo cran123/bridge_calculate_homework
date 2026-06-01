@@ -13,6 +13,7 @@
 #include <fstream>
 #include <iostream>
 #include <iomanip>
+#include <string>
 
 using namespace std;
 
@@ -23,6 +24,9 @@ private:
 
 //!	File stream for output
 	ofstream OutputFile;
+
+//!	Output file name (used to derive VTK file names)
+	string OutputFileName_;
 
 //!	Designed as a single instance class
 	static COutputter* _instance;
@@ -56,6 +60,9 @@ public:
 //!	Output bar element data
 	void OutputBarElements(unsigned int EleGrp);
 
+//!	Output hex8 element data
+	void OutputHex8Elements(unsigned int EleGrp);
+
 //!	Output load data 
 	void OutputLoadInfo(); 
 
@@ -64,6 +71,9 @@ public:
 
 //!	Output element stresses 
 	void OutputElementStress();
+
+//!	Output VTK/ParaView file for a load case
+	void OutputVTK(unsigned int LoadCase);
 
 //!	Print total system data
 	void OutputTotalSystemData();

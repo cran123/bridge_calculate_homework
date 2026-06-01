@@ -70,6 +70,9 @@ int main(int argc, char *argv[])
     
 //  Assemble the banded gloabl stiffness matrix
 	FEMData->AssembleStiffnessMatrix();
+
+//  Apply displacement boundary conditions (penalty method)
+    FEMData->ApplyDisplacementPenalty();
     
     double time_assemble = timer.ElapsedTime();
 
@@ -102,6 +105,9 @@ int main(int argc, char *argv[])
 
 //      Calculate and output stresses of all elements
         Output->OutputElementStress();
+
+    //      Output VTK/ParaView file for this load case
+        Output->OutputVTK(lcase + 1);
     }
 
     double time_solution = timer.ElapsedTime();

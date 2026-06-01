@@ -10,8 +10,12 @@
 
 #include "Domain.h"
 #include "Material.h"
+#include <cmath>
 
 using namespace std;
+
+// Default gravity vector for self-weight (edit here if needed)
+static const double kDefaultGravity[3] = {0.0, 0.0, -9.81};
 
 //	Clear an array
 template <class type> void clear( type* a, unsigned int N )
@@ -42,6 +46,7 @@ CDomain::CDomain()
 
 	Force = nullptr;
 	StiffnessMatrix = nullptr;
+	DisplacementPenalty_ = 0.0;
 }
 
 //	Desconstructor
@@ -293,6 +298,37 @@ void CDomain::AssembleStiffnessMatrix()
 
 }
 
+//	Apply penalty terms for displacement boundary conditions
+void CDomain::ApplyDisplacementPenalty()
+{
+	if (!StiffnessMatrix)
+		return;
+
+	double maxDiag = 0.0;
+	for (unsigned int i = 1; i <= NEQ; i++)
+	{
+		double v = fabs((*StiffnessMatrix)(i, i));
+		if (v > maxDiag)
+			maxDiag = v;
+	}
+
+	if (maxDiag <= 0.0)
+		maxDiag = 1.0;
+
+	DisplacementPenalty_ = maxDiag * 1.0e10;
+
+	for (unsigned int lcase = 0; lcase < NLCASE; lcase++)
+	{
+		CLoadCaseData* LoadData = &LoadCases[lcase];
+		for (unsigned int i = 0; i < LoadData->ndisp; i++)
+		{
+			unsigned int eq = NodeList[LoadData->dispNode[i] - 1].bcode[LoadData->dispDof[i] - 1];
+			if (eq)
+				(*StiffnessMatrix)(eq, eq) += DisplacementPenalty_;
+		}
+	}
+}
+
 //	Assemble the global nodal force vector for load case LoadCase
 bool CDomain::AssembleForce(unsigned int LoadCase)
 {
@@ -303,6 +339,40 @@ bool CDomain::AssembleForce(unsigned int LoadCase)
 
     clear(Force, NEQ);
 
+//  Assemble self-weight for all elements
+	const double* gravity = kDefaultGravity;
+	if (LoadData->gravityFlag)
+		gravity = LoadData->gravity;
+	else
+		gravity = nullptr;
+
+	for (unsigned int EleGrp = 0; EleGrp < NUMEG; EleGrp++)
+	{
+		CElementGroup& ElementGrp = EleGrpList[EleGrp];
+		unsigned int NUME = ElementGrp.GetNUME();
+
+		for (unsigned int Ele = 0; Ele < NUME; Ele++)
+		{
+			CElement& Element = ElementGrp[Ele];
+			unsigned int nd = Element.GetND();
+			unsigned int* lm = Element.GetLocationMatrix();
+
+			double* bodyForce = new double[nd];
+			if (gravity)
+				Element.ElementBodyForce(bodyForce, gravity);
+			else
+				clear(bodyForce, nd);
+
+			for (unsigned int i = 0; i < nd; i++)
+			{
+				if (lm[i])
+					Force[lm[i] - 1] += bodyForce[i];
+			}
+
+			delete[] bodyForce;
+		}
+	}
+
 //	Loop over for all concentrated loads in load case LoadCase
 	for (unsigned int lnum = 0; lnum < LoadData->nloads; lnum++)
 	{
@@ -310,6 +380,31 @@ bool CDomain::AssembleForce(unsigned int LoadCase)
         
         if(dof) // The DOF is activated
             Force[dof - 1] += LoadData->load[lnum];
+	}
+
+	// DEBUG: print gravity and total force sums
+	{
+		double sumFx = 0, sumFy = 0, sumFz = 0;
+		for (unsigned int eq = 0; eq < NEQ; eq++) {
+			if (eq % 3 == 0) sumFx += Force[eq];
+			else if (eq % 3 == 1) sumFy += Force[eq];
+			else sumFz += Force[eq];
+		}
+		std::cout << "[DEBUG AssembleForce] LoadCase=" << LoadCase
+			<< " gravityFlag=" << LoadData->gravityFlag
+			<< " gravity=(" << LoadData->gravity[0] << "," << LoadData->gravity[1] << "," << LoadData->gravity[2] << ")"
+			<< " SumFx=" << sumFx << " SumFy=" << sumFy << " SumFz=" << sumFz << std::endl;
+	}
+
+	//	Apply prescribed displacements via penalty terms
+	if (DisplacementPenalty_ > 0.0)
+	{
+		for (unsigned int i = 0; i < LoadData->ndisp; i++)
+		{
+			unsigned int eq = NodeList[LoadData->dispNode[i] - 1].bcode[LoadData->dispDof[i] - 1];
+			if (eq)
+				Force[eq - 1] += DisplacementPenalty_ * LoadData->dispValue[i];
+		}
 	}
 
 	return true;

@@ -257,7 +257,7 @@ void CSkylineMatrix<T_>::Assembly(double* Matrix, unsigned int* LocationMatrix, 
             
             if (!Li) continue;
             
-            (*this)(Li,Lj) += Matrix[DiagjElement + j - i];
+            (*this)(Li,Lj) += Matrix[DiagjElement + i];
         }
     }
     

@@ -1,3 +1,8 @@
+data/
 build/
-src/out
-.vscode
+dist/
+.vs/
+docs/
+.vscode/
+doxygen/
+docs/

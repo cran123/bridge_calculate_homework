@@ -82,27 +82,38 @@ void CBar::ElementStiffness(double* Matrix)
 
 	double k = material_->E * material_->Area / L / L2;
 
+	// Column 0: K[0][0]
 	Matrix[0] = k*DX2[0];
-	Matrix[1] = k*DX2[1];
-	Matrix[2] = k*DX2[3];
-	Matrix[3] = k*DX2[2];
+
+	// Column 1: K[0][1], K[1][1]
+	Matrix[1] = k*DX2[3];
+	Matrix[2] = k*DX2[1];
+
+	// Column 2: K[0][2], K[1][2], K[2][2]
+	Matrix[3] = k*DX2[5];
 	Matrix[4] = k*DX2[4];
-	Matrix[5] = k*DX2[5];
-	Matrix[6] = k*DX2[0];
-	Matrix[7] = -k*DX2[5];
-	Matrix[8] = -k*DX2[3];
-	Matrix[9] = -k*DX2[0];
-	Matrix[10] = k*DX2[1];
-	Matrix[11] = k*DX2[3];
+	Matrix[5] = k*DX2[2];
+
+	// Column 3: K[0][3], K[1][3], K[2][3], K[3][3]
+	Matrix[6] = -k*DX2[0];
+	Matrix[7] = -k*DX2[3];
+	Matrix[8] = -k*DX2[5];
+	Matrix[9] = k*DX2[0];
+
+	// Column 4: K[0][4], K[1][4], K[2][4], K[3][4], K[4][4]
+	Matrix[10] = -k*DX2[3];
+	Matrix[11] = -k*DX2[1];
 	Matrix[12] = -k*DX2[4];
-	Matrix[13] = -k*DX2[1];
-	Matrix[14] = -k*DX2[3];
-	Matrix[15] = k*DX2[2];
-	Matrix[16] = k*DX2[4];
-	Matrix[17] = k*DX2[5];
-	Matrix[18] = -k*DX2[2];
-	Matrix[19] = -k*DX2[4];
-	Matrix[20] = -k*DX2[5];
+	Matrix[13] = k*DX2[3];
+	Matrix[14] = k*DX2[1];
+
+	// Column 5: K[0][5], K[1][5], K[2][5], K[3][5], K[4][5], K[5][5]
+	Matrix[15] = -k*DX2[5];
+	Matrix[16] = -k*DX2[4];
+	Matrix[17] = -k*DX2[2];
+	Matrix[18] = k*DX2[5];
+	Matrix[19] = k*DX2[4];
+	Matrix[20] = k*DX2[2];
 }
 
 //	Calculate element stress 
@@ -131,5 +142,29 @@ void CBar::ElementStress(double* stress, double* Displacement)
 	{
 		if (LocationMatrix_[i])
 			*stress += S[i] * Displacement[LocationMatrix_[i]-1];
+	}
+}
+
+//	Calculate element body force vector (self-weight)
+void CBar::ElementBodyForce(double* bodyForce, const double gravity[3])
+{
+	clear(bodyForce, ND_);
+
+	CBarMaterial* material_ = dynamic_cast<CBarMaterial*>(ElementMaterial_);
+
+	double DX[3];
+	for (unsigned int i = 0; i < 3; i++)
+		DX[i] = nodes_[1]->XYZ[i] - nodes_[0]->XYZ[i];
+
+	double L = sqrt(DX[0] * DX[0] + DX[1] * DX[1] + DX[2] * DX[2]);
+	if (L == 0.0)
+		return;
+
+	double total = material_->Density * material_->Area * L;
+	for (unsigned int i = 0; i < 3; i++)
+	{
+		double half = 0.5 * total * gravity[i];
+		bodyForce[i] += half;
+		bodyForce[i + 3] += half;
 	}
 }

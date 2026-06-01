@@ -75,6 +75,9 @@ private:
 //!	Global nodal force/displacement vector
 	double* Force;
 
+//!	Penalty factor for displacement boundary conditions
+	double DisplacementPenalty_;
+
 private:
 
 //!	Constructor
@@ -116,6 +119,9 @@ public:
 
 //!	Assemble the global nodal force vector for load case LoadCase
 	bool AssembleForce(unsigned int LoadCase); 
+
+//!	Apply penalty terms for displacement boundary conditions
+	void ApplyDisplacementPenalty();
 
 //!	Return solution mode
 	inline unsigned int GetMODEX() { return MODEX; }

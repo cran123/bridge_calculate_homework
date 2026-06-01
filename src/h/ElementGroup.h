@@ -14,6 +14,8 @@
 
 #include "Element.h"
 #include "Bar.h"
+#include "Hex8.h"
+#include "BbarHex8.h"
 #include "Material.h"
 #include "Node.h"
 
@@ -23,13 +25,14 @@ using namespace std;
 enum ElementTypes
 {
     UNDEFINED = 0,
-    Bar,    // Bar element
-    Q4,     // 4Q element
-    T3,     // 3T element
-    H8,     // 8H element
-    Beam,   // Beam element
-    Plate,  // Plate element
-    Shell   // Shell elment
+    Bar,        // Bar element
+    Q4,         // 4Q element
+    T3,         // 3T element
+    H8,         // 8H standard element
+    Beam,       // Beam element
+    Plate,      // Plate element
+    Shell,      // Shell element
+    BbarH8      // 8H B-bar element
 };
 
 //! Element group class

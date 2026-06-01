@@ -43,9 +43,27 @@ class CBarMaterial : public CMaterial
 public:
 
 	double Area;	//!< Sectional area of a bar element
+	double Density;	//!< Material density for self-weight
 
 public:
 	
+//!	Read material data from stream Input
+	virtual bool Read(ifstream& Input);
+
+//!	Write material data to Stream
+	virtual void Write(COutputter& output);
+};
+
+//! Material class for Hex8 element
+class CHex8Material : public CMaterial
+{
+public:
+
+	double Nu;		//!< Poisson's ratio
+	double Density;	//!< Material density for self-weight
+
+public:
+
 //!	Read material data from stream Input
 	virtual bool Read(ifstream& Input);
 

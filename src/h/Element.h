@@ -47,9 +47,8 @@ public:
     virtual ~CElement() {
         if (nodes_)
             delete [] nodes_;
-        
-        if (ElementMaterial_)
-            delete [] ElementMaterial_;
+        // Element does not own ElementMaterial_ (points into global material arrays)
+        // so do NOT delete ElementMaterial_ here to avoid double-free.
         
         if (LocationMatrix_)
             delete [] LocationMatrix_;
@@ -86,6 +85,12 @@ public:
 
 //!	Calculate element stress 
 	virtual void ElementStress(double* stress, double* Displacement) = 0;
+
+//!	Calculate element body force vector (e.g., self-weight)
+    virtual void ElementBodyForce(double* bodyForce, const double gravity[3])
+    {
+        clear(bodyForce, ND_);
+    }
 
 //! Return number of nodes per element
     inline unsigned int GetNEN() { return NEN_; }
