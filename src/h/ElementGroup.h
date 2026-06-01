@@ -17,6 +17,7 @@
 #include "Beam3D2.h"
 #include "Hex8.h"
 #include "BbarHex8.h"
+#include "Plate4.h"
 #include "Material.h"
 #include "Node.h"
 

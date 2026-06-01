@@ -62,6 +62,9 @@ public:
 //!	Output hex8 element data
 	void OutputHex8Elements(unsigned int EleGrp);
 
+//!	Output plate element data
+	void OutputPlateElements(unsigned int EleGrp);
+
 //!	Output load data 
 	void OutputLoadInfo(); 
 

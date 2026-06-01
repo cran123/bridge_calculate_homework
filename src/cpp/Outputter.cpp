@@ -15,6 +15,7 @@
 #include "Domain.h"
 #include "Hex8.h"
 #include "Outputter.h"
+#include "Plate4.h"
 #include "SkylineMatrix.h"
 
 using namespace std;
@@ -153,6 +154,7 @@ void COutputter::OutputElementInfo()
 		*this << "     EQ.1, TRUSS ELEMENTS" << endl
 			  << "     EQ.4, H8 EIGHT-NODE SOLID ELEMENTS" << endl
 			  << "     EQ.5, B31 TWO-NODE 3D BEAM ELEMENTS" << endl
+			  << "     EQ.6, S4R FOUR-NODE PLATE/SHELL ELEMENTS" << endl
 			  << "     EQ.8, B-BAR H8 SOLID ELEMENTS" << endl
 			  << "     OTHER TYPES, NOT AVAILABLE" << endl
 			  << endl;
@@ -172,6 +174,9 @@ void COutputter::OutputElementInfo()
 			case ElementTypes::H8:
 			case ElementTypes::BbarH8:
 				OutputHex8Elements(EleGrp);
+				break;
+			case ElementTypes::Plate:
+				OutputPlateElements(EleGrp);
 				break;
 		    default:
 		        *this << ElementType << " has not been implemented yet." << endl;
@@ -302,6 +307,49 @@ void COutputter::OutputHex8Elements(unsigned int EleGrp)
 
 	*this << " ELEMENT     NODE     NODE     NODE     NODE     NODE     NODE     NODE     NODE       MATERIAL" << endl
 		  << " NUMBER-N      1        2        3        4        5        6        7        8       SET NUMBER" << endl;
+
+	unsigned int NUME = ElementGroup.GetNUME();
+
+	for (unsigned int Ele = 0; Ele < NUME; Ele++)
+	{
+		*this << setw(5) << Ele + 1;
+		ElementGroup[Ele].Write(*this);
+	}
+
+	*this << endl;
+}
+
+//	Output plate element data
+void COutputter::OutputPlateElements(unsigned int EleGrp)
+{
+	CDomain* FEMData = CDomain::GetInstance();
+
+	CElementGroup& ElementGroup = FEMData->GetEleGrpList()[EleGrp];
+	unsigned int NUMMAT = ElementGroup.GetNUMMAT();
+
+	*this << " M A T E R I A L   A N D   T H I C K N E S S   D E F I N I T I O N" << endl
+		  << endl;
+	*this << " NUMBER OF DIFFERENT SETS OF PLATE MATERIAL"
+		  << " . . . . . . . . . . . . . . . . . . . .( NPAR(3) ) . . =" << setw(5) << NUMMAT
+		  << endl
+		  << endl;
+
+	*this << "  SET       YOUNG'S        POISSON       THICKNESS       DENSITY" << endl
+		  << " NUMBER     MODULUS         RATIO" << endl;
+
+	*this << setiosflags(ios::scientific) << setprecision(5);
+
+	for (unsigned int mset = 0; mset < NUMMAT; mset++)
+	{
+		*this << setw(5) << mset + 1;
+		ElementGroup.GetMaterial(mset).Write(*this);
+	}
+
+	*this << endl << endl
+		  << " E L E M E N T   I N F O R M A T I O N" << endl;
+
+	*this << " ELEMENT     NODE     NODE     NODE     NODE       MATERIAL" << endl
+		  << " NUMBER-N      1        2        3        4       SET NUMBER" << endl;
 
 	unsigned int NUME = ElementGroup.GetNUME();
 
@@ -456,6 +504,31 @@ void COutputter::OutputElementStress()
 						  << setw(12) << syz
 						  << setw(12) << sxz
 						  << setw(12) << vm << endl;
+				}
+
+				*this << endl;
+				break;
+			}
+
+			case ElementTypes::Plate:
+			{
+				*this << "  ELEMENT         SX           SY          SXY           MX           MY          MXY" << endl
+					  << "  NUMBER" << endl;
+
+				double stress[6];
+
+				for (unsigned int Ele = 0; Ele < NUME; Ele++)
+				{
+					CElement& Element = EleGrp[Ele];
+					Element.ElementStress(stress, Displacement);
+
+					*this << setw(5) << Ele + 1
+						  << setw(13) << stress[0]
+						  << setw(13) << stress[1]
+						  << setw(13) << stress[2]
+						  << setw(13) << stress[3]
+						  << setw(13) << stress[4]
+						  << setw(13) << stress[5] << endl;
 				}
 
 				*this << endl;

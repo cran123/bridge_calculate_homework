@@ -78,6 +78,10 @@ void CElementGroup::CalculateMemberSize()
             ElementSize_ = sizeof(CBbarHex8);
             MaterialSize_ = sizeof(CHex8Material);
             break;
+        case ElementTypes::Plate:
+            ElementSize_ = sizeof(CPlate4);
+            MaterialSize_ = sizeof(CPlateMaterial);
+            break;
         default:
             std::cerr << "Type " << ElementType_ << " not available. See CElementGroup::CalculateMemberSize." << std::endl;
             exit(5);
@@ -102,6 +106,9 @@ void CElementGroup::AllocateElements(std::size_t size)
         case ElementTypes::BbarH8:
             ElementList_ = new CBbarHex8[size];
             break;
+        case ElementTypes::Plate:
+            ElementList_ = new CPlate4[size];
+            break;
         default:
             std::cerr << "Type " << ElementType_ << " not available. See CElementGroup::AllocateElement." << std::endl;
             exit(5);
@@ -122,6 +129,9 @@ void CElementGroup::AllocateMaterials(std::size_t size)
         case ElementTypes::H8:
         case ElementTypes::BbarH8:
             MaterialList_ = new CHex8Material[size];
+            break;
+        case ElementTypes::Plate:
+            MaterialList_ = new CPlateMaterial[size];
             break;
         default:
             std::cerr << "Type " << ElementType_ << " not available. See CElementGroup::AllocateMaterial." << std::endl;
