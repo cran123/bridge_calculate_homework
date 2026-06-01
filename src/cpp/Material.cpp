@@ -13,6 +13,8 @@
 #include <iostream>
 #include <fstream>
 #include <iomanip>
+#include <sstream>
+#include <vector>
 
 using namespace std;
 
@@ -21,7 +23,24 @@ bool CBarMaterial::Read(ifstream& Input)
 {
 	Input >> nset;	// Number of property set
 
-	Input >> E >> Area;	// Young's modulus and section area
+	string line;
+	getline(Input, line);
+	istringstream stream(line);
+
+	vector<double> values;
+	double value;
+	while (stream >> value)
+		values.push_back(value);
+
+	if (values.size() < 2)
+	{
+		cerr << "*** Error *** Invalid truss material set " << nset << endl;
+		return false;
+	}
+
+	E = values[0];
+	Area = values[1];
+	rho = values.size() > 2 ? values[2] : 0.0;
 
 	return true;
 }
@@ -29,5 +48,45 @@ bool CBarMaterial::Read(ifstream& Input)
 //	Write material data to Stream
 void CBarMaterial::Write(COutputter& output)
 {
-	output << setw(16) << E << setw(16) << Area << endl;
+	output << setw(16) << E << setw(16) << Area << setw(16) << rho << endl;
+}
+
+//	Read beam material data from stream Input
+bool CBeamMaterial::Read(ifstream& Input)
+{
+	Input >> nset;
+
+	string line;
+	getline(Input, line);
+	istringstream stream(line);
+
+	vector<double> values;
+	double value;
+	while (stream >> value)
+		values.push_back(value);
+
+	if (values.size() < 7)
+	{
+		cerr << "*** Error *** Invalid beam material set " << nset
+			 << ". Expected: set E nu A Iy Iz J rho" << endl;
+		return false;
+	}
+
+	E = values[0];
+	nu = values[1];
+	Area = values[2];
+	Iy = values[3];
+	Iz = values[4];
+	J = values[5];
+	rho = values[6];
+
+	return true;
+}
+
+//	Write beam material data to Stream
+void CBeamMaterial::Write(COutputter& output)
+{
+	output << setw(16) << E << setw(16) << nu << setw(16) << Area
+		   << setw(16) << Iy << setw(16) << Iz << setw(16) << J
+		   << setw(16) << rho << endl;
 }

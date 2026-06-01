@@ -1,0 +1,10 @@
+build/
+.cache/
+.vscode/
+*.out
+*.vtu
+*.exe
+*.obj
+*.pdb
+*.ilk
+*.user

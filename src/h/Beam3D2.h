@@ -1,11 +1,5 @@
 /*****************************************************************************/
 /*  STAP++ : A C++ FEM code sharing the same input data file with STAP90     */
-/*     Computational Dynamics Laboratory                                     */
-/*     School of Aerospace Engineering, Tsinghua University                  */
-/*                                                                           */
-/*     Release 1.11, November 22, 2017                                       */
-/*                                                                           */
-/*     http://www.comdyn.cn/                                                 */
 /*****************************************************************************/
 
 #pragma once
@@ -14,16 +8,24 @@
 
 using namespace std;
 
-//! Bar element class
-class CBar : public CElement
+//! Two-node 3D Euler-Bernoulli beam element, compatible with ABAQUS B31
+class CBeam3D2 : public CElement
 {
+private:
+	double Reference_[3];	//!< Reference vector defining the local y direction
+
+	double Length() const;
+	bool LocalAxes(double axes[3][3]) const;
+	void LocalStiffness(double stiffness[12][12]) const;
+	void Transformation(double transform[12][12]) const;
+
 public:
 
 //!	Constructor
-	CBar();
+	CBeam3D2();
 
 //!	Desconstructor
-	~CBar();
+	~CBeam3D2();
 
 //!	Read element data from stream Input
 	virtual bool Read(ifstream& Input, CMaterial* MaterialSets, CNode* NodeList);
@@ -37,9 +39,12 @@ public:
 //!	Calculate element stiffness matrix
 	virtual void ElementStiffness(double* Matrix);
 
-//!	Calculate element stress
+//!	Calculate element stress and section forces
 	virtual void ElementStress(double* stress, double* Displacement);
 
 //!	Calculate equivalent nodal body force
 	virtual void ElementBodyForce(double* bodyForce, const double gravity[3]);
+
+//!	Calculate local element end force vector
+	void ElementEndForce(double* force, double* Displacement);
 };

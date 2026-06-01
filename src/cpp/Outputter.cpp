@@ -10,6 +10,7 @@
 
 #include <ctime>
 
+#include "Beam3D2.h"
 #include "Domain.h"
 #include "Outputter.h"
 #include "SkylineMatrix.h"
@@ -116,7 +117,7 @@ void COutputter::OutputEquationNumber()
 	*this << " EQUATION NUMBERS" << endl
 		  << endl;
 	*this << "   NODE NUMBER   DEGREES OF FREEDOM" << endl;
-	*this << "        N           X    Y    Z" << endl;
+	*this << "        N          UX   UY   UZ   RX   RY   RZ" << endl;
 
 	for (unsigned int np = 0; np < NUMNP; np++) // Loop over for all node
 		NodeList[np].WriteEquationNo(*this);
@@ -148,8 +149,8 @@ void COutputter::OutputElementInfo()
 		*this << " ELEMENT TYPE  . . . . . . . . . . . . .( NPAR(1) ) . . =" << setw(5)
 			  << ElementType << endl;
 		*this << "     EQ.1, TRUSS ELEMENTS" << endl
-			  << "     EQ.2, ELEMENTS CURRENTLY" << endl
-			  << "     EQ.3, NOT AVAILABLE" << endl
+			  << "     EQ.5, B31 TWO-NODE 3D BEAM ELEMENTS" << endl
+			  << "     OTHER TYPES, NOT AVAILABLE" << endl
 			  << endl;
 
 		*this << " NUMBER OF ELEMENTS. . . . . . . . . . .( NPAR(2) ) . . =" << setw(5) << NUME
@@ -160,6 +161,9 @@ void COutputter::OutputElementInfo()
 		{
 			case ElementTypes::Bar: // Bar element
 				OutputBarElements(EleGrp);
+				break;
+			case ElementTypes::Beam:
+				OutputBeamElements(EleGrp);
 				break;
 		    default:
 		        *this << ElementType << " has not been implemented yet." << endl;
@@ -182,9 +186,9 @@ void COutputter::OutputBarElements(unsigned int EleGrp)
 		  << endl
 		  << endl;
 
-	*this << "  SET       YOUNG'S     CROSS-SECTIONAL" << endl
+	*this << "  SET       YOUNG'S     CROSS-SECTIONAL      DENSITY" << endl
 		  << " NUMBER     MODULUS          AREA" << endl
-		  << "               E              A" << endl;
+		  << "               E              A              RHO" << endl;
 
 	*this << setiosflags(ios::scientific) << setprecision(5);
 
@@ -209,6 +213,51 @@ void COutputter::OutputBarElements(unsigned int EleGrp)
         *this << setw(5) << Ele+1;
 		ElementGroup[Ele].Write(*this);
     }
+
+	*this << endl;
+}
+
+//	Output beam element data
+void COutputter::OutputBeamElements(unsigned int EleGrp)
+{
+	CDomain* FEMData = CDomain::GetInstance();
+
+	CElementGroup& ElementGroup = FEMData->GetEleGrpList()[EleGrp];
+	unsigned int NUMMAT = ElementGroup.GetNUMMAT();
+
+	*this << " M A T E R I A L   A N D   S E C T I O N   D E F I N I T I O N" << endl
+		  << endl;
+	*this << " NUMBER OF DIFFERENT SETS OF BEAM MATERIAL" << endl;
+	*this << " AND CROSS-SECTIONAL CONSTANTS . . . . . .( NPAR(3) ) . . =" << setw(5) << NUMMAT
+		  << endl
+		  << endl;
+
+	*this << "  SET       YOUNG'S        POISSON          AREA            IY"
+		  << "              IZ              J            DENSITY" << endl
+		  << " NUMBER     MODULUS         RATIO" << endl;
+
+	*this << setiosflags(ios::scientific) << setprecision(5);
+
+	for (unsigned int mset = 0; mset < NUMMAT; mset++)
+	{
+		*this << setw(5) << mset + 1;
+		ElementGroup.GetMaterial(mset).Write(*this);
+	}
+
+	*this << endl << endl
+		  << " E L E M E N T   I N F O R M A T I O N" << endl;
+
+	*this << " ELEMENT     NODE     NODE       MATERIAL"
+		  << "       REF-VX          REF-VY          REF-VZ" << endl
+		  << " NUMBER-N      I        J       SET NUMBER" << endl;
+
+	unsigned int NUME = ElementGroup.GetNUME();
+
+	for (unsigned int Ele = 0; Ele < NUME; Ele++)
+	{
+		*this << setw(5) << Ele + 1;
+		ElementGroup[Ele].Write(*this);
+	}
 
 	*this << endl;
 }
@@ -249,7 +298,8 @@ void COutputter::OutputNodalDisplacement()
 
 	*this << " D I S P L A C E M E N T S" << endl
 		  << endl;
-	*this << "  NODE           X-DISPLACEMENT    Y-DISPLACEMENT    Z-DISPLACEMENT" << endl;
+	*this << "  NODE           X-DISPLACEMENT    Y-DISPLACEMENT    Z-DISPLACEMENT"
+		  << "    X-ROTATION        Y-ROTATION        Z-ROTATION" << endl;
 
 	for (unsigned int np = 0; np < FEMData->GetNUMNP(); np++)
 		NodeList[np].WriteNodalDisplacement(*this, Displacement);
@@ -298,6 +348,32 @@ void COutputter::OutputElementStress()
 
 				break;
 
+			case ElementTypes::Beam:
+			{
+				*this << "  ELEMENT             AXIAL             SHEAR-Y          SHEAR-Z"
+					  << "          TORQUE            MOMENT-Y         MOMENT-Z" << endl
+					  << "  NUMBER" << endl;
+
+				double stress[6];
+
+				for (unsigned int Ele = 0; Ele < NUME; Ele++)
+				{
+					CElement& Element = EleGrp[Ele];
+					Element.ElementStress(stress, Displacement);
+
+					*this << setw(5) << Ele + 1
+						  << setw(22) << stress[0]
+						  << setw(18) << stress[4]
+						  << setw(18) << stress[5]
+						  << setw(18) << stress[3]
+						  << setw(18) << stress[1]
+						  << setw(18) << stress[2] << endl;
+				}
+
+				*this << endl;
+				break;
+			}
+
 			default: // Invalid element type
 				cerr << "*** Error *** Elment type " << ElementType
 					<< " has not been implemented.\n\n";
@@ -313,13 +389,21 @@ void COutputter::OutputTotalSystemData()
 	*this << "	TOTAL SYSTEM DATA" << endl
 		  << endl;
 
+	double meanHalfBandwidth = FEMData->GetNEQ()
+		? static_cast<double>(FEMData->GetStiffnessMatrix()->size()) / FEMData->GetNEQ()
+		: 0.0;
+	unsigned long long estimatedMemory =
+		static_cast<unsigned long long>(FEMData->GetStiffnessMatrix()->size()) * sizeof(double) +
+		static_cast<unsigned long long>(FEMData->GetNEQ()) * (sizeof(double) + 2 * sizeof(unsigned int));
+
 	*this << "     NUMBER OF EQUATIONS . . . . . . . . . . . . . .(NEQ) = " << FEMData->GetNEQ()
 		  << endl
 		  << "     NUMBER OF MATRIX ELEMENTS . . . . . . . . . . .(NWK) = " << FEMData->GetStiffnessMatrix()->size()
 		  << endl
 		  << "     MAXIMUM HALF BANDWIDTH  . . . . . . . . . . . .(MK ) = " << FEMData->GetStiffnessMatrix()->GetMaximumHalfBandwidth()
 		  << endl
-		  << "     MEAN HALF BANDWIDTH . . . . . . . . . . . . . .(MM ) = " << FEMData->GetStiffnessMatrix()->size() / FEMData->GetNEQ() << endl
+		  << "     MEAN HALF BANDWIDTH . . . . . . . . . . . . . .(MM ) = " << meanHalfBandwidth << endl
+		  << "     ESTIMATED SOLVER MEMORY BYTES . . . . . . . . .      = " << estimatedMemory << endl
 		  << endl
 		  << endl;
 }

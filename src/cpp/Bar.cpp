@@ -54,6 +54,15 @@ void CBar::Write(COutputter& output)
 		   << setw(9) << nodes_[1]->NodeNumber << setw(12) << ElementMaterial_->nset << endl;
 }
 
+// Generate location matrix
+void CBar::GenerateLocationMatrix()
+{
+	unsigned int i = 0;
+	for (unsigned int N = 0; N < NEN_; N++)
+		for (unsigned int D = 0; D < 3; D++)
+			LocationMatrix_[i++] = nodes_[N]->bcode[D];
+}
+
 //	Calculate element stiffness matrix 
 //	Upper triangular matrix, stored as an array column by colum starting from the diagonal element
 void CBar::ElementStiffness(double* Matrix)
@@ -132,4 +141,27 @@ void CBar::ElementStress(double* stress, double* Displacement)
 		if (LocationMatrix_[i])
 			*stress += S[i] * Displacement[LocationMatrix_[i]-1];
 	}
+}
+
+//	Calculate equivalent nodal body force
+void CBar::ElementBodyForce(double* bodyForce, const double gravity[3])
+{
+	clear(bodyForce, ND_);
+
+	CBarMaterial* material_ = dynamic_cast<CBarMaterial*>(ElementMaterial_);
+	if (!material_)
+		return;
+
+	double DX[3];
+	double L2 = 0.0;
+	for (unsigned int i = 0; i < 3; i++)
+	{
+		DX[i] = nodes_[1]->XYZ[i] - nodes_[0]->XYZ[i];
+		L2 += DX[i] * DX[i];
+	}
+
+	double nodalMass = material_->rho * material_->Area * sqrt(L2) / 2.0;
+	for (unsigned int node = 0; node < 2; node++)
+		for (unsigned int dof = 0; dof < 3; dof++)
+			bodyForce[node * 3 + dof] = nodalMass * gravity[dof];
 }

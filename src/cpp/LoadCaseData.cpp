@@ -12,6 +12,8 @@
 
 #include <iomanip>
 #include <iostream>
+#include <sstream>
+#include <string>
 
 using namespace std;
 
@@ -36,8 +38,28 @@ bool CLoadCaseData :: Read(ifstream& Input)
 //	Load case number (LL) and number of concentrated loads in this load case(NL)
 	
 	unsigned int NL;
+	string line;
 
 	Input >> NL;
+	getline(Input, line);
+
+	istringstream lineStream(line);
+	unsigned int gravityFlag = 0;
+	double gx = 0.0;
+	double gy = 0.0;
+	double gz = 0.0;
+	if (lineStream >> gravityFlag >> gx >> gy >> gz)
+	{
+		hasGravity = gravityFlag != 0;
+		gravity[0] = gx;
+		gravity[1] = gy;
+		gravity[2] = gz;
+	}
+	else
+	{
+		hasGravity = false;
+		gravity[0] = gravity[1] = gravity[2] = 0.0;
+	}
 
 	Allocate(NL);
 
@@ -50,6 +72,14 @@ bool CLoadCaseData :: Read(ifstream& Input)
 //	Write load case data to stream
 void CLoadCaseData::Write(COutputter& output)
 {
+	if (hasGravity)
+	{
+		output << " GRAVITY LOAD VECTOR:"
+			   << setw(16) << gravity[0]
+			   << setw(16) << gravity[1]
+			   << setw(16) << gravity[2] << endl;
+	}
+
 	for (unsigned int i = 0; i < nloads; i++)
 		output << setw(7) << node[i] << setw(13) << dof[i]  << setw(19) << load[i] << endl;
 }

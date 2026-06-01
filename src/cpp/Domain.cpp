@@ -312,6 +312,32 @@ bool CDomain::AssembleForce(unsigned int LoadCase)
             Force[dof - 1] += LoadData->load[lnum];
 	}
 
+	if (LoadData->hasGravity)
+	{
+		for (unsigned int EleGrp = 0; EleGrp < NUMEG; EleGrp++)
+		{
+			CElementGroup& ElementGrp = EleGrpList[EleGrp];
+			unsigned int NUME = ElementGrp.GetNUME();
+			double* BodyForce = new double[ElementGrp[0].GetND()];
+
+			for (unsigned int Ele = 0; Ele < NUME; Ele++)
+			{
+				CElement& Element = ElementGrp[Ele];
+				Element.ElementBodyForce(BodyForce, LoadData->gravity);
+				unsigned int* LocationMatrix = Element.GetLocationMatrix();
+
+				for (unsigned int i = 0; i < Element.GetND(); i++)
+				{
+					unsigned int dof = LocationMatrix[i];
+					if (dof)
+						Force[dof - 1] += BodyForce[i];
+				}
+			}
+
+			delete[] BodyForce;
+		}
+	}
+
 	return true;
 }
 

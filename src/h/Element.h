@@ -41,15 +41,12 @@ protected:
 public:
 
 //!	Constructor
-	CElement() : NEN_(0), nodes_(nullptr), ElementMaterial_(nullptr) {}
+	CElement() : NEN_(0), nodes_(nullptr), ElementMaterial_(nullptr), LocationMatrix_(nullptr), ND_(0) {}
 
 //! Virtual deconstructor
     virtual ~CElement() {
         if (nodes_)
             delete [] nodes_;
-        
-        if (ElementMaterial_)
-            delete [] ElementMaterial_;
         
         if (LocationMatrix_)
             delete [] LocationMatrix_;
@@ -75,7 +72,7 @@ public:
     virtual unsigned int SizeOfStiffnessMatrix()
     {
         unsigned int size = 0;
-        for (int i=1; i<= ND_; i++)
+        for (unsigned int i=1; i<= ND_; i++)
             size += i;
         
         return size;
@@ -86,6 +83,12 @@ public:
 
 //!	Calculate element stress 
 	virtual void ElementStress(double* stress, double* Displacement) = 0;
+
+//!	Calculate equivalent nodal body force
+	virtual void ElementBodyForce(double* bodyForce, const double gravity[3])
+	{
+		clear(bodyForce, ND_);
+	}
 
 //! Return number of nodes per element
     inline unsigned int GetNEN() { return NEN_; }
