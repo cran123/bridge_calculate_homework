@@ -23,8 +23,8 @@ public:
 	unsigned int* node;		//!< Node number to which this load is applied
 	unsigned int* dof;		//!< Degree of freedom number for this load component
 	double* load;			//!< Magnitude of load
-	unsigned int gravityFlag;	//!< 1: include gravity, 0: ignore
-	double gravity[3];		//!< Gravity vector
+	bool hasGravity;		//!< Whether gravity load is applied
+	double gravity[3];		//!< Gravity acceleration vector
 	unsigned int ndisp;		//!< Number of prescribed displacements
 	unsigned int* dispNode;		//!< Node number for displacement
 	unsigned int* dispDof;		//!< Degree of freedom number for displacement
@@ -32,13 +32,8 @@ public:
 
 public:
 
-	CLoadCaseData() : nloads(0), node(NULL), dof(NULL), load(NULL),
-		gravityFlag(1), ndisp(0), dispNode(NULL), dispDof(NULL), dispValue(NULL)
-	{
-		gravity[0] = 0.0;
-		gravity[1] = 0.0;
-		gravity[2] = -9.81;
-	};
+	CLoadCaseData() : nloads(0), node(NULL), dof(NULL), load(NULL), hasGravity(false), gravity{0.0, 0.0, 0.0},
+		ndisp(0), dispNode(NULL), dispDof(NULL), dispValue(NULL) {};
 	~CLoadCaseData();
 
 //!	Set nloads, and new array node, dof and load

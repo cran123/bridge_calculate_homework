@@ -8,13 +8,12 @@
 /*     http://www.comdyn.cn/                                                 */
 /*****************************************************************************/
 
-#include <ctime>
 #include <cmath>
-#include <fstream>
-#include <sstream>
-#include <vector>
+#include <ctime>
 
+#include "Beam3D2.h"
 #include "Domain.h"
+#include "Hex8.h"
 #include "Outputter.h"
 #include "SkylineMatrix.h"
 
@@ -40,7 +39,6 @@ COutputter* COutputter::_instance = nullptr;
 //	Constructor
 COutputter::COutputter(string FileName)
 {
-	OutputFileName_ = FileName;
 	OutputFile.open(FileName);
 
 	if (!OutputFile)
@@ -121,7 +119,7 @@ void COutputter::OutputEquationNumber()
 	*this << " EQUATION NUMBERS" << endl
 		  << endl;
 	*this << "   NODE NUMBER   DEGREES OF FREEDOM" << endl;
-	*this << "        N           X    Y    Z" << endl;
+	*this << "        N          UX   UY   UZ   RX   RY   RZ" << endl;
 
 	for (unsigned int np = 0; np < NUMNP; np++) // Loop over for all node
 		NodeList[np].WriteEquationNo(*this);
@@ -152,22 +150,12 @@ void COutputter::OutputElementInfo()
 
 		*this << " ELEMENT TYPE  . . . . . . . . . . . . .( NPAR(1) ) . . =" << setw(5)
 			  << ElementType << endl;
-		switch (ElementType)
-		{
-			case ElementTypes::Bar:
-				*this << "     EQ.1, TRUSS ELEMENTS" << endl;
-				break;
-			case ElementTypes::H8:
-				*this << "     EQ.4, HEX8 SOLID ELEMENTS" << endl;
-				break;
-			case ElementTypes::BbarH8:
-				*this << "     EQ.8, B-BAR HEX8 SOLID ELEMENTS" << endl;
-				break;
-			default:
-				*this << "     (UNKNOWN TYPE)" << endl;
-				break;
-		}
-		*this << endl;
+		*this << "     EQ.1, TRUSS ELEMENTS" << endl
+			  << "     EQ.4, H8 EIGHT-NODE SOLID ELEMENTS" << endl
+			  << "     EQ.5, B31 TWO-NODE 3D BEAM ELEMENTS" << endl
+			  << "     EQ.8, B-BAR H8 SOLID ELEMENTS" << endl
+			  << "     OTHER TYPES, NOT AVAILABLE" << endl
+			  << endl;
 
 		*this << " NUMBER OF ELEMENTS. . . . . . . . . . .( NPAR(2) ) . . =" << setw(5) << NUME
 			  << endl
@@ -178,10 +166,11 @@ void COutputter::OutputElementInfo()
 			case ElementTypes::Bar: // Bar element
 				OutputBarElements(EleGrp);
 				break;
-			case ElementTypes::H8: // Hex8 element
-				OutputHex8Elements(EleGrp);
+			case ElementTypes::Beam:
+				OutputBeamElements(EleGrp);
 				break;
-			case ElementTypes::BbarH8: // B-bar Hex8 element
+			case ElementTypes::H8:
+			case ElementTypes::BbarH8:
 				OutputHex8Elements(EleGrp);
 				break;
 		    default:
@@ -189,50 +178,6 @@ void COutputter::OutputElementInfo()
 		        break;
 		}
 	}
-}
-
-//	Output hex8 element data
-void COutputter::OutputHex8Elements(unsigned int EleGrp)
-{
-	CDomain* FEMData = CDomain::GetInstance();
-
-	CElementGroup& ElementGroup = FEMData->GetEleGrpList()[EleGrp];
-	unsigned int NUMMAT = ElementGroup.GetNUMMAT();
-
-	*this << " M A T E R I A L   D E F I N I T I O N" << endl
-		  << endl;
-	*this << " NUMBER OF DIFFERENT SETS OF MATERIAL" << endl;
-	*this << " AND SOLID MATERIAL CONSTANTS  . . . .( NPAR(3) ) . . =" << setw(5) << NUMMAT
-		  << endl
-		  << endl;
-
-	*this << "  SET       YOUNG'S          POISSON         DENSITY" << endl
-		  << " NUMBER     MODULUS           RATIO" << endl
-		  << "               E               NU" << endl;
-
-	*this << setiosflags(ios::scientific) << setprecision(5);
-
-	for (unsigned int mset = 0; mset < NUMMAT; mset++)
-	{
-		*this << setw(5) << mset + 1;
-		ElementGroup.GetMaterial(mset).Write(*this);
-	}
-
-	*this << endl << endl
-		  << " E L E M E N T   I N F O R M A T I O N" << endl;
-
-	*this << " ELEMENT     NODE     NODE     NODE     NODE     NODE     NODE     NODE     NODE   MATERIAL" << endl
-		  << " NUMBER-N      1        2        3        4        5        6        7        8      SET" << endl;
-
-	unsigned int NUME = ElementGroup.GetNUME();
-
-	for (unsigned int Ele = 0; Ele < NUME; Ele++)
-	{
-		*this << setw(5) << Ele + 1;
-		ElementGroup[Ele].Write(*this);
-	}
-
-	*this << endl;
 }
 //	Output bar element data
 void COutputter::OutputBarElements(unsigned int EleGrp)
@@ -249,9 +194,9 @@ void COutputter::OutputBarElements(unsigned int EleGrp)
 		  << endl
 		  << endl;
 
-	*this << "  SET       YOUNG'S     CROSS-SECTIONAL        DENSITY" << endl
+	*this << "  SET       YOUNG'S     CROSS-SECTIONAL      DENSITY" << endl
 		  << " NUMBER     MODULUS          AREA" << endl
-		  << "               E              A" << endl;
+		  << "               E              A              RHO" << endl;
 
 	*this << setiosflags(ios::scientific) << setprecision(5);
 
@@ -280,6 +225,95 @@ void COutputter::OutputBarElements(unsigned int EleGrp)
 	*this << endl;
 }
 
+//	Output beam element data
+void COutputter::OutputBeamElements(unsigned int EleGrp)
+{
+	CDomain* FEMData = CDomain::GetInstance();
+
+	CElementGroup& ElementGroup = FEMData->GetEleGrpList()[EleGrp];
+	unsigned int NUMMAT = ElementGroup.GetNUMMAT();
+
+	*this << " M A T E R I A L   A N D   S E C T I O N   D E F I N I T I O N" << endl
+		  << endl;
+	*this << " NUMBER OF DIFFERENT SETS OF BEAM MATERIAL" << endl;
+	*this << " AND CROSS-SECTIONAL CONSTANTS . . . . . .( NPAR(3) ) . . =" << setw(5) << NUMMAT
+		  << endl
+		  << endl;
+
+	*this << "  SET       YOUNG'S        POISSON          AREA            IY"
+		  << "              IZ              J            DENSITY" << endl
+		  << " NUMBER     MODULUS         RATIO" << endl;
+
+	*this << setiosflags(ios::scientific) << setprecision(5);
+
+	for (unsigned int mset = 0; mset < NUMMAT; mset++)
+	{
+		*this << setw(5) << mset + 1;
+		ElementGroup.GetMaterial(mset).Write(*this);
+	}
+
+	*this << endl << endl
+		  << " E L E M E N T   I N F O R M A T I O N" << endl;
+
+	*this << " ELEMENT     NODE     NODE       MATERIAL"
+		  << "       REF-VX          REF-VY          REF-VZ" << endl
+		  << " NUMBER-N      I        J       SET NUMBER" << endl;
+
+	unsigned int NUME = ElementGroup.GetNUME();
+
+	for (unsigned int Ele = 0; Ele < NUME; Ele++)
+	{
+		*this << setw(5) << Ele + 1;
+		ElementGroup[Ele].Write(*this);
+	}
+
+	*this << endl;
+}
+
+//	Output hex8 element data
+void COutputter::OutputHex8Elements(unsigned int EleGrp)
+{
+	CDomain* FEMData = CDomain::GetInstance();
+
+	CElementGroup& ElementGroup = FEMData->GetEleGrpList()[EleGrp];
+	unsigned int NUMMAT = ElementGroup.GetNUMMAT();
+
+	*this << " M A T E R I A L   D E F I N I T I O N" << endl
+		  << endl;
+	*this << " NUMBER OF DIFFERENT SETS OF SOLID MATERIAL"
+		  << " . . . . . . . . . . . . . . . . . . . .( NPAR(3) ) . . =" << setw(5) << NUMMAT
+		  << endl
+		  << endl;
+
+	*this << "  SET       YOUNG'S        POISSON        DENSITY" << endl
+		  << " NUMBER     MODULUS         RATIO" << endl
+		  << "               E             NU             RHO" << endl;
+
+	*this << setiosflags(ios::scientific) << setprecision(5);
+
+	for (unsigned int mset = 0; mset < NUMMAT; mset++)
+	{
+		*this << setw(5) << mset + 1;
+		ElementGroup.GetMaterial(mset).Write(*this);
+	}
+
+	*this << endl << endl
+		  << " E L E M E N T   I N F O R M A T I O N" << endl;
+
+	*this << " ELEMENT     NODE     NODE     NODE     NODE     NODE     NODE     NODE     NODE       MATERIAL" << endl
+		  << " NUMBER-N      1        2        3        4        5        6        7        8       SET NUMBER" << endl;
+
+	unsigned int NUME = ElementGroup.GetNUME();
+
+	for (unsigned int Ele = 0; Ele < NUME; Ele++)
+	{
+		*this << setw(5) << Ele + 1;
+		ElementGroup[Ele].Write(*this);
+	}
+
+	*this << endl;
+}
+
 //	Print load data
 void COutputter::OutputLoadInfo()
 {
@@ -294,11 +328,7 @@ void COutputter::OutputLoadInfo()
 			  << endl;
 
 		*this << "     LOAD CASE NUMBER . . . . . . . =" << setw(6) << lcase << endl;
-		*this << "     NUMBER OF CONCENTRATED LOADS . =" << setw(6) << LoadData->nloads << endl;
-		*this << "     NUMBER OF DISP. CONSTRAINTS . =" << setw(6) << LoadData->ndisp << endl;
-		*this << "     GRAVITY FLAG . . . . . . . . . =" << setw(6) << LoadData->gravityFlag << endl;
-		*this << "     GRAVITY VECTOR . . . . . . . . =" << setw(14) << LoadData->gravity[0]
-			  << setw(14) << LoadData->gravity[1] << setw(14) << LoadData->gravity[2] << endl
+		*this << "     NUMBER OF CONCENTRATED LOADS . =" << setw(6) << LoadData->nloads << endl
 			  << endl;
 		*this << "    NODE       DIRECTION      LOAD" << endl
 			  << "   NUMBER                   MAGNITUDE" << endl;
@@ -320,7 +350,8 @@ void COutputter::OutputNodalDisplacement()
 
 	*this << " D I S P L A C E M E N T S" << endl
 		  << endl;
-	*this << "  NODE           X-DISPLACEMENT    Y-DISPLACEMENT    Z-DISPLACEMENT" << endl;
+	*this << "  NODE           X-DISPLACEMENT    Y-DISPLACEMENT    Z-DISPLACEMENT"
+		  << "    X-ROTATION        Y-ROTATION        Z-ROTATION" << endl;
 
 	for (unsigned int np = 0; np < FEMData->GetNUMNP(); np++)
 		NodeList[np].WriteNodalDisplacement(*this, Displacement);
@@ -369,15 +400,43 @@ void COutputter::OutputElementStress()
 
 				break;
 
-			case ElementTypes::H8: // Hex8 element
-			case ElementTypes::BbarH8: // B-bar Hex8 element
-				*this << "  ELEMENT        SXX          SYY          SZZ          SXY          SYZ          SXZ        VON MISES" << endl
-					<< "  NUMBER" << endl;
+			case ElementTypes::Beam:
+			{
+				*this << "  ELEMENT             AXIAL             SHEAR-Y          SHEAR-Z"
+					  << "          TORQUE            MOMENT-Y         MOMENT-Z" << endl
+					  << "  NUMBER" << endl;
+
+				double stress[6];
 
 				for (unsigned int Ele = 0; Ele < NUME; Ele++)
 				{
 					CElement& Element = EleGrp[Ele];
-					double stress[6];
+					Element.ElementStress(stress, Displacement);
+
+					*this << setw(5) << Ele + 1
+						  << setw(22) << stress[0]
+						  << setw(18) << stress[4]
+						  << setw(18) << stress[5]
+						  << setw(18) << stress[3]
+						  << setw(18) << stress[1]
+						  << setw(18) << stress[2] << endl;
+				}
+
+				*this << endl;
+				break;
+			}
+
+			case ElementTypes::H8:
+			case ElementTypes::BbarH8:
+			{
+				*this << "  ELEMENT        SXX          SYY          SZZ          SXY          SYZ          SXZ        VON MISES" << endl
+					  << "  NUMBER" << endl;
+
+				double stress[6];
+
+				for (unsigned int Ele = 0; Ele < NUME; Ele++)
+				{
+					CElement& Element = EleGrp[Ele];
 					Element.ElementStress(stress, Displacement);
 
 					double sxx = stress[0];
@@ -390,255 +449,24 @@ void COutputter::OutputElementStress()
 						+ 3.0 * (sxy * sxy + syz * syz + sxz * sxz));
 
 					*this << setw(5) << Ele + 1
-						<< setw(12) << sxx
-						<< setw(12) << syy
-						<< setw(12) << szz
-						<< setw(12) << sxy
-						<< setw(12) << syz
-						<< setw(12) << sxz
-						<< setw(12) << vm << endl;
+						  << setw(12) << sxx
+						  << setw(12) << syy
+						  << setw(12) << szz
+						  << setw(12) << sxy
+						  << setw(12) << syz
+						  << setw(12) << sxz
+						  << setw(12) << vm << endl;
 				}
 
 				*this << endl;
-
 				break;
+			}
 
 			default: // Invalid element type
 				cerr << "*** Error *** Elment type " << ElementType
 					<< " has not been implemented.\n\n";
 		}
 	}
-}
-
-//	Output VTK/ParaView file for a load case
-void COutputter::OutputVTK(unsigned int LoadCase)
-{
-	CDomain* FEMData = CDomain::GetInstance();
-	CNode* NodeList = FEMData->GetNodeList();
-	double* Displacement = FEMData->GetDisplacement();
-
-	unsigned int NUMNP = FEMData->GetNUMNP();
-	unsigned int NUMEG = FEMData->GetNUMEG();
-
-	std::string base = OutputFileName_;
-	std::size_t dot = base.find_last_of('.');
-	if (dot != std::string::npos)
-		base = base.substr(0, dot);
-
-	std::ostringstream name;
-	name << base << "_lc" << LoadCase << ".vtu";
-
-	std::ofstream out(name.str());
-	if (!out)
-	{
-		cerr << "*** Error *** Failed to open VTK file: " << name.str() << endl;
-		return;
-	}
-
-	std::vector<int> connectivity;
-	std::vector<int> offsets;
-	std::vector<unsigned int> cellTypes;
-	std::vector<unsigned int> elementTypes;
-	std::vector<double> sxx, syy, szz, sxy, syz, sxz;
-	std::vector<double> sxx2, syy2, sxy2;
-	std::vector<double> mx, my, mxy;
-	std::vector<double> vonMises;
-	std::vector<double> axialForce;
-	std::vector<double> beamMy, beamMz, beamTorque;
-
-	int offset = 0;
-
-	for (unsigned int EleGrpIndex = 0; EleGrpIndex < NUMEG; EleGrpIndex++)
-	{
-		CElementGroup& EleGrp = FEMData->GetEleGrpList()[EleGrpIndex];
-		unsigned int NUME = EleGrp.GetNUME();
-		ElementTypes ElementType = EleGrp.GetElementType();
-
-		for (unsigned int Ele = 0; Ele < NUME; Ele++)
-		{
-			CElement& Element = EleGrp[Ele];
-			CNode** nodes = Element.GetNodes();
-
-			if (ElementType == ElementTypes::Bar)
-			{
-				connectivity.push_back(nodes[0]->NodeNumber - 1);
-				connectivity.push_back(nodes[1]->NodeNumber - 1);
-				offset += 2;
-				offsets.push_back(offset);
-				cellTypes.push_back(3); // VTK_LINE
-			}
-			else if (ElementType == ElementTypes::H8 || ElementType == ElementTypes::BbarH8)
-			{
-				for (int i = 0; i < 8; i++)
-					connectivity.push_back(nodes[i]->NodeNumber - 1);
-				offset += 8;
-				offsets.push_back(offset);
-				cellTypes.push_back(12); // VTK_HEXAHEDRON
-			}
-			else
-			{
-				continue;
-			}
-
-			elementTypes.push_back(static_cast<unsigned int>(ElementType));
-
-			if (ElementType == ElementTypes::H8 || ElementType == ElementTypes::BbarH8)
-			{
-				double stress[6];
-				Element.ElementStress(stress, Displacement);
-				double vm = sqrt(0.5 * ((stress[0] - stress[1]) * (stress[0] - stress[1])
-					+ (stress[1] - stress[2]) * (stress[1] - stress[2])
-					+ (stress[2] - stress[0]) * (stress[2] - stress[0]))
-					+ 3.0 * (stress[3] * stress[3] + stress[4] * stress[4] + stress[5] * stress[5]));
-
-				sxx.push_back(stress[0]);
-				syy.push_back(stress[1]);
-				szz.push_back(stress[2]);
-				sxy.push_back(stress[3]);
-				syz.push_back(stress[4]);
-				sxz.push_back(stress[5]);
-				vonMises.push_back(vm);
-				axialForce.push_back(0.0);
-			}
-			else if (ElementType == ElementTypes::Bar)
-			{
-				double stress;
-				Element.ElementStress(&stress, Displacement);
-				CBarMaterial& material = *dynamic_cast<CBarMaterial*>(Element.GetElementMaterial());
-
-				sxx.push_back(0.0);
-				syy.push_back(0.0);
-				szz.push_back(0.0);
-				sxy.push_back(0.0);
-				syz.push_back(0.0);
-				sxz.push_back(0.0);
-				vonMises.push_back(0.0);
-				axialForce.push_back(stress * material.Area);
-			}
-			else
-			{
-				sxx.push_back(0.0);
-				syy.push_back(0.0);
-				szz.push_back(0.0);
-				sxy.push_back(0.0);
-				syz.push_back(0.0);
-				sxz.push_back(0.0);
-				vonMises.push_back(0.0);
-				axialForce.push_back(0.0);
-			}
-
-			sxx2.push_back(0.0);
-			syy2.push_back(0.0);
-			sxy2.push_back(0.0);
-			mx.push_back(0.0);
-			my.push_back(0.0);
-			mxy.push_back(0.0);
-			beamMy.push_back(0.0);
-			beamMz.push_back(0.0);
-			beamTorque.push_back(0.0);
-		}
-	}
-
-	unsigned int numCells = static_cast<unsigned int>(cellTypes.size());
-
-	out << "<?xml version=\"1.0\"?>\n";
-	out << "<VTKFile type=\"UnstructuredGrid\" version=\"0.1\" byte_order=\"LittleEndian\">\n";
-	out << "  <UnstructuredGrid>\n";
-	out << "    <Piece NumberOfPoints=\"" << NUMNP << "\" NumberOfCells=\"" << numCells << "\">\n";
-
-	out << "      <PointData>\n";
-	out << "        <DataArray type=\"Float64\" Name=\"Displacement\" NumberOfComponents=\"3\" format=\"ascii\">\n";
-	for (unsigned int i = 0; i < NUMNP; i++)
-	{
-		double ux = 0.0, uy = 0.0, uz = 0.0;
-		if (NodeList[i].bcode[0]) ux = Displacement[NodeList[i].bcode[0] - 1];
-		if (NodeList[i].bcode[1]) uy = Displacement[NodeList[i].bcode[1] - 1];
-		if (NodeList[i].bcode[2]) uz = Displacement[NodeList[i].bcode[2] - 1];
-		out << "          " << ux << " " << uy << " " << uz << "\n";
-	}
-	out << "        </DataArray>\n";
-
-	out << "        <DataArray type=\"Float64\" Name=\"Rotation\" NumberOfComponents=\"3\" format=\"ascii\">\n";
-	for (unsigned int i = 0; i < NUMNP; i++)
-		out << "          0 0 0\n";
-	out << "        </DataArray>\n";
-
-	out << "        <DataArray type=\"Float64\" Name=\"DisplacementMagnitude\" NumberOfComponents=\"1\" format=\"ascii\">\n";
-	for (unsigned int i = 0; i < NUMNP; i++)
-	{
-		double ux = 0.0, uy = 0.0, uz = 0.0;
-		if (NodeList[i].bcode[0]) ux = Displacement[NodeList[i].bcode[0] - 1];
-		if (NodeList[i].bcode[1]) uy = Displacement[NodeList[i].bcode[1] - 1];
-		if (NodeList[i].bcode[2]) uz = Displacement[NodeList[i].bcode[2] - 1];
-		out << "          " << sqrt(ux * ux + uy * uy + uz * uz) << "\n";
-	}
-	out << "        </DataArray>\n";
-	out << "      </PointData>\n";
-
-	out << "      <CellData>\n";
-	out << "        <DataArray type=\"Int32\" Name=\"ElementType\" NumberOfComponents=\"1\" format=\"ascii\">\n";
-	for (unsigned int i = 0; i < numCells; i++)
-		out << "          " << elementTypes[i] << "\n";
-	out << "        </DataArray>\n";
-
-	out << "        <DataArray type=\"Float64\" Name=\"VonMises\" NumberOfComponents=\"1\" format=\"ascii\">\n";
-	for (unsigned int i = 0; i < numCells; i++)
-		out << "          " << vonMises[i] << "\n";
-	out << "        </DataArray>\n";
-
-	out << "        <DataArray type=\"Float64\" Name=\"SXX SYY SZZ SXY SYZ SXZ\" NumberOfComponents=\"6\" format=\"ascii\">\n";
-	for (unsigned int i = 0; i < numCells; i++)
-		out << "          " << sxx[i] << " " << syy[i] << " " << szz[i] << " " << sxy[i] << " " << syz[i] << " " << sxz[i] << "\n";
-	out << "        </DataArray>\n";
-
-	out << "        <DataArray type=\"Float64\" Name=\"SXX SYY SXY\" NumberOfComponents=\"3\" format=\"ascii\">\n";
-	for (unsigned int i = 0; i < numCells; i++)
-		out << "          " << sxx2[i] << " " << syy2[i] << " " << sxy2[i] << "\n";
-	out << "        </DataArray>\n";
-
-	out << "        <DataArray type=\"Float64\" Name=\"MX MY MXY\" NumberOfComponents=\"3\" format=\"ascii\">\n";
-	for (unsigned int i = 0; i < numCells; i++)
-		out << "          " << mx[i] << " " << my[i] << " " << mxy[i] << "\n";
-	out << "        </DataArray>\n";
-
-	out << "        <DataArray type=\"Float64\" Name=\"AxialForce\" NumberOfComponents=\"1\" format=\"ascii\">\n";
-	for (unsigned int i = 0; i < numCells; i++)
-		out << "          " << axialForce[i] << "\n";
-	out << "        </DataArray>\n";
-
-	out << "        <DataArray type=\"Float64\" Name=\"BeamMy BeamMz BeamTorque\" NumberOfComponents=\"3\" format=\"ascii\">\n";
-	for (unsigned int i = 0; i < numCells; i++)
-		out << "          " << beamMy[i] << " " << beamMz[i] << " " << beamTorque[i] << "\n";
-	out << "        </DataArray>\n";
-	out << "      </CellData>\n";
-
-	out << "      <Points>\n";
-	out << "        <DataArray type=\"Float64\" NumberOfComponents=\"3\" format=\"ascii\">\n";
-	for (unsigned int i = 0; i < NUMNP; i++)
-		out << "          " << NodeList[i].XYZ[0] << " " << NodeList[i].XYZ[1] << " " << NodeList[i].XYZ[2] << "\n";
-	out << "        </DataArray>\n";
-	out << "      </Points>\n";
-
-	out << "      <Cells>\n";
-	out << "        <DataArray type=\"Int32\" Name=\"connectivity\" format=\"ascii\">\n";
-	for (unsigned int i = 0; i < connectivity.size(); i++)
-		out << "          " << connectivity[i] << "\n";
-	out << "        </DataArray>\n";
-
-	out << "        <DataArray type=\"Int32\" Name=\"offsets\" format=\"ascii\">\n";
-	for (unsigned int i = 0; i < offsets.size(); i++)
-		out << "          " << offsets[i] << "\n";
-	out << "        </DataArray>\n";
-
-	out << "        <DataArray type=\"UInt8\" Name=\"types\" format=\"ascii\">\n";
-	for (unsigned int i = 0; i < cellTypes.size(); i++)
-		out << "          " << cellTypes[i] << "\n";
-	out << "        </DataArray>\n";
-	
-	out << "      </Cells>\n";
-	out << "    </Piece>\n";
-	out << "  </UnstructuredGrid>\n";
-	out << "</VTKFile>\n";
 }
 
 //	Print total system data
@@ -649,13 +477,21 @@ void COutputter::OutputTotalSystemData()
 	*this << "	TOTAL SYSTEM DATA" << endl
 		  << endl;
 
+	double meanHalfBandwidth = FEMData->GetNEQ()
+		? static_cast<double>(FEMData->GetStiffnessMatrix()->size()) / FEMData->GetNEQ()
+		: 0.0;
+	unsigned long long estimatedMemory =
+		static_cast<unsigned long long>(FEMData->GetStiffnessMatrix()->size()) * sizeof(double) +
+		static_cast<unsigned long long>(FEMData->GetNEQ()) * (sizeof(double) + 2 * sizeof(unsigned int));
+
 	*this << "     NUMBER OF EQUATIONS . . . . . . . . . . . . . .(NEQ) = " << FEMData->GetNEQ()
 		  << endl
 		  << "     NUMBER OF MATRIX ELEMENTS . . . . . . . . . . .(NWK) = " << FEMData->GetStiffnessMatrix()->size()
 		  << endl
 		  << "     MAXIMUM HALF BANDWIDTH  . . . . . . . . . . . .(MK ) = " << FEMData->GetStiffnessMatrix()->GetMaximumHalfBandwidth()
 		  << endl
-		  << "     MEAN HALF BANDWIDTH . . . . . . . . . . . . . .(MM ) = " << FEMData->GetStiffnessMatrix()->size() / FEMData->GetNEQ() << endl
+		  << "     MEAN HALF BANDWIDTH . . . . . . . . . . . . . .(MM ) = " << meanHalfBandwidth << endl
+		  << "     ESTIMATED SOLVER MEMORY BYTES . . . . . . . . .      = " << estimatedMemory << endl
 		  << endl
 		  << endl;
 }

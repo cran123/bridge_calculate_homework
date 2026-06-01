@@ -1,8 +1,10 @@
-data/
 build/
-dist/
-.vs/
-docs/
+.cache/
 .vscode/
-doxygen/
-docs/
+*.out
+*.vtu
+*.exe
+*.obj
+*.pdb
+*.ilk
+*.user

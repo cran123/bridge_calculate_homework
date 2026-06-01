@@ -10,12 +10,10 @@
 
 #include "Domain.h"
 #include "Material.h"
+
 #include <cmath>
 
 using namespace std;
-
-// Default gravity vector for self-weight (edit here if needed)
-static const double kDefaultGravity[3] = {0.0, 0.0, -9.81};
 
 //	Clear an array
 template <class type> void clear( type* a, unsigned int N )
@@ -339,40 +337,6 @@ bool CDomain::AssembleForce(unsigned int LoadCase)
 
     clear(Force, NEQ);
 
-//  Assemble self-weight for all elements
-	const double* gravity = kDefaultGravity;
-	if (LoadData->gravityFlag)
-		gravity = LoadData->gravity;
-	else
-		gravity = nullptr;
-
-	for (unsigned int EleGrp = 0; EleGrp < NUMEG; EleGrp++)
-	{
-		CElementGroup& ElementGrp = EleGrpList[EleGrp];
-		unsigned int NUME = ElementGrp.GetNUME();
-
-		for (unsigned int Ele = 0; Ele < NUME; Ele++)
-		{
-			CElement& Element = ElementGrp[Ele];
-			unsigned int nd = Element.GetND();
-			unsigned int* lm = Element.GetLocationMatrix();
-
-			double* bodyForce = new double[nd];
-			if (gravity)
-				Element.ElementBodyForce(bodyForce, gravity);
-			else
-				clear(bodyForce, nd);
-
-			for (unsigned int i = 0; i < nd; i++)
-			{
-				if (lm[i])
-					Force[lm[i] - 1] += bodyForce[i];
-			}
-
-			delete[] bodyForce;
-		}
-	}
-
 //	Loop over for all concentrated loads in load case LoadCase
 	for (unsigned int lnum = 0; lnum < LoadData->nloads; lnum++)
 	{
@@ -382,21 +346,32 @@ bool CDomain::AssembleForce(unsigned int LoadCase)
             Force[dof - 1] += LoadData->load[lnum];
 	}
 
-	// DEBUG: print gravity and total force sums
+	if (LoadData->hasGravity)
 	{
-		double sumFx = 0, sumFy = 0, sumFz = 0;
-		for (unsigned int eq = 0; eq < NEQ; eq++) {
-			if (eq % 3 == 0) sumFx += Force[eq];
-			else if (eq % 3 == 1) sumFy += Force[eq];
-			else sumFz += Force[eq];
+		for (unsigned int EleGrp = 0; EleGrp < NUMEG; EleGrp++)
+		{
+			CElementGroup& ElementGrp = EleGrpList[EleGrp];
+			unsigned int NUME = ElementGrp.GetNUME();
+			double* BodyForce = new double[ElementGrp[0].GetND()];
+
+			for (unsigned int Ele = 0; Ele < NUME; Ele++)
+			{
+				CElement& Element = ElementGrp[Ele];
+				Element.ElementBodyForce(BodyForce, LoadData->gravity);
+				unsigned int* LocationMatrix = Element.GetLocationMatrix();
+
+				for (unsigned int i = 0; i < Element.GetND(); i++)
+				{
+					unsigned int dof = LocationMatrix[i];
+					if (dof)
+						Force[dof - 1] += BodyForce[i];
+				}
+			}
+
+			delete[] BodyForce;
 		}
-		std::cout << "[DEBUG AssembleForce] LoadCase=" << LoadCase
-			<< " gravityFlag=" << LoadData->gravityFlag
-			<< " gravity=(" << LoadData->gravity[0] << "," << LoadData->gravity[1] << "," << LoadData->gravity[2] << ")"
-			<< " SumFx=" << sumFx << " SumFy=" << sumFy << " SumFz=" << sumFz << std::endl;
 	}
 
-	//	Apply prescribed displacements via penalty terms
 	if (DisplacementPenalty_ > 0.0)
 	{
 		for (unsigned int i = 0; i < LoadData->ndisp; i++)

@@ -43,7 +43,7 @@ class CBarMaterial : public CMaterial
 public:
 
 	double Area;	//!< Sectional area of a bar element
-	double Density;	//!< Material density for self-weight
+	double rho;		//!< Mass density
 
 public:
 	
@@ -54,16 +54,37 @@ public:
 	virtual void Write(COutputter& output);
 };
 
+//!	Material and section class for a 3D beam element
+class CBeamMaterial : public CMaterial
+{
+public:
+	double nu;		//!< Poisson's ratio
+	double Area;	//!< Sectional area
+	double Iy;		//!< Second moment of area about local y axis
+	double Iz;		//!< Second moment of area about local z axis
+	double J;		//!< Torsion constant
+	double rho;		//!< Mass density
+
+public:
+
+//!	Read material data from stream Input
+	virtual bool Read(ifstream& Input);
+
+//!	Write material data to Stream
+	virtual void Write(COutputter& output);
+
+//!	Return shear modulus
+	double G() const { return E / (2.0 * (1.0 + nu)); }
+};
+
 //! Material class for Hex8 element
 class CHex8Material : public CMaterial
 {
 public:
-
 	double Nu;		//!< Poisson's ratio
 	double Density;	//!< Material density for self-weight
 
 public:
-
 //!	Read material data from stream Input
 	virtual bool Read(ifstream& Input);
 

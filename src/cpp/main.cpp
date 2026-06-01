@@ -12,6 +12,9 @@
 #include "Bar.h"
 #include "Outputter.h"
 #include "Clock.h"
+#include "VTKOutputter.h"
+
+#include <string>
 
 using namespace std;
 
@@ -71,8 +74,8 @@ int main(int argc, char *argv[])
 //  Assemble the banded gloabl stiffness matrix
 	FEMData->AssembleStiffnessMatrix();
 
-//  Apply displacement boundary conditions (penalty method)
-    FEMData->ApplyDisplacementPenalty();
+//  Apply penalty terms for prescribed displacements
+	FEMData->ApplyDisplacementPenalty();
     
     double time_assemble = timer.ElapsedTime();
 
@@ -82,18 +85,28 @@ int main(int argc, char *argv[])
 //  Perform L*D*L(T) factorization of stiffness matrix
     Solver->LDLT();
 
+    double time_factorization = timer.ElapsedTime();
+
 #ifdef _DEBUG_
     Output->PrintStiffnessMatrix();
 #endif
-        
+
+    double time_load_solution = 0.0;
+    double time_output = 0.0;
+
 //  Loop over for all load cases
     for (unsigned int lcase = 0; lcase < FEMData->GetNLCASE(); lcase++)
     {
+        double time_case_start = timer.ElapsedTime();
+
 //      Assemble righ-hand-side vector (force vector)
         FEMData->AssembleForce(lcase + 1);
             
 //      Reduce right-hand-side force vector and back substitute
         Solver->BackSubstitution(FEMData->GetForce());
+
+        double time_case_solved = timer.ElapsedTime();
+        time_load_solution += time_case_solved - time_case_start;
 
         *Output << " LOAD CASE" << setw(5) << lcase + 1 << endl << endl << endl;
 
@@ -106,8 +119,11 @@ int main(int argc, char *argv[])
 //      Calculate and output stresses of all elements
         Output->OutputElementStress();
 
-    //      Output VTK/ParaView file for this load case
-        Output->OutputVTK(lcase + 1);
+        string VTKFile = filename + "_lc" + to_string(lcase + 1) + ".vtu";
+        CVTKOutputter::WriteVTU(VTKFile, lcase + 1);
+
+        double time_case_output = timer.ElapsedTime();
+        time_output += time_case_output - time_case_solved;
     }
 
     double time_solution = timer.ElapsedTime();
@@ -117,8 +133,12 @@ int main(int argc, char *argv[])
     *Output << "\n S O L U T I O N   T I M E   L O G   I N   S E C \n\n"
             << "     TIME FOR INPUT PHASE = " << time_input << endl
             << "     TIME FOR CALCULATION OF STIFFNESS MATRIX = " << time_assemble - time_input << endl
-            << "     TIME FOR FACTORIZATION AND LOAD CASE SOLUTIONS = " << time_solution - time_assemble << endl << endl
+            << "     TIME FOR FACTORIZATION = " << time_factorization - time_assemble << endl
+            << "     TIME FOR LOAD CASE SOLUTIONS = " << time_load_solution << endl
+            << "     TIME FOR RESULT OUTPUT = " << time_output << endl << endl
             << "     T O T A L   S O L U T I O N   T I M E = " << time_solution << endl << endl;
+
+    delete Solver;
 
 	return 0;
 }

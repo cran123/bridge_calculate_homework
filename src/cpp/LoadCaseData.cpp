@@ -13,6 +13,7 @@
 #include <iomanip>
 #include <iostream>
 #include <sstream>
+#include <string>
 
 using namespace std;
 
@@ -21,9 +22,6 @@ CLoadCaseData :: ~CLoadCaseData()
 	delete [] node;
 	delete [] dof;
 	delete [] load;
-	delete [] dispNode;
-	delete [] dispDof;
-	delete [] dispValue;
 }
 
 void CLoadCaseData :: Allocate(unsigned int num)
@@ -46,34 +44,34 @@ void CLoadCaseData :: AllocateDisp(unsigned int num)
 bool CLoadCaseData :: Read(ifstream& Input)
 {
 //	Load case number (LL) and number of concentrated loads in this load case(NL)
+	
+	unsigned int NL;
 	string line;
-	if (!std::getline(Input >> std::ws, line))
-		return false;
 
-	std::istringstream iss(line);
-	unsigned int NL = 0;
-	if (!(iss >> NL))
-		return false;
+	Input >> NL;
+	getline(Input, line);
 
-	gravityFlag = 1;
-	gravity[0] = 0.0;
-	gravity[1] = 0.0;
-	gravity[2] = -9.81;
-
-	ndisp = 0;
-
-	unsigned int flag = 0;
-	double gx = 0.0, gy = 0.0, gz = 0.0;
-	if (iss >> flag >> gx >> gy >> gz)
+	istringstream lineStream(line);
+	unsigned int gravityFlag = 0;
+	double gx = 0.0;
+	double gy = 0.0;
+	double gz = 0.0;
+	if (lineStream >> gravityFlag >> gx >> gy >> gz)
 	{
-		gravityFlag = flag;
+		hasGravity = gravityFlag != 0;
 		gravity[0] = gx;
 		gravity[1] = gy;
 		gravity[2] = gz;
 
 		unsigned int nd = 0;
-		if (iss >> nd)
+		if (lineStream >> nd)
 			ndisp = nd;
+	}
+	else
+	{
+		hasGravity = false;
+		gravity[0] = gravity[1] = gravity[2] = 0.0;
+		ndisp = 0;
 	}
 
 	Allocate(NL);
@@ -94,14 +92,14 @@ bool CLoadCaseData :: Read(ifstream& Input)
 //	Write load case data to stream
 void CLoadCaseData::Write(COutputter& output)
 {
+	if (hasGravity)
+	{
+		output << " GRAVITY LOAD VECTOR:"
+			   << setw(16) << gravity[0]
+			   << setw(16) << gravity[1]
+			   << setw(16) << gravity[2] << endl;
+	}
+
 	for (unsigned int i = 0; i < nloads; i++)
 		output << setw(7) << node[i] << setw(13) << dof[i]  << setw(19) << load[i] << endl;
-
-	if (ndisp > 0)
-	{
-		output << endl;
-		output << "    NODE       DOF      DISPLACEMENT" << endl;
-		for (unsigned int i = 0; i < ndisp; i++)
-			output << setw(7) << dispNode[i] << setw(10) << dispDof[i] << setw(19) << dispValue[i] << endl;
-	}
 }

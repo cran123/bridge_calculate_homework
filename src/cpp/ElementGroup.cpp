@@ -66,6 +66,10 @@ void CElementGroup::CalculateMemberSize()
             ElementSize_ = sizeof(CBar);
             MaterialSize_ = sizeof(CBarMaterial);
             break;
+        case ElementTypes::Beam:
+            ElementSize_ = sizeof(CBeam3D2);
+            MaterialSize_ = sizeof(CBeamMaterial);
+            break;
         case ElementTypes::H8:
             ElementSize_ = sizeof(CHex8);
             MaterialSize_ = sizeof(CHex8Material);
@@ -89,6 +93,9 @@ void CElementGroup::AllocateElements(std::size_t size)
         case ElementTypes::Bar:
             ElementList_ = new CBar[size];
             break;
+        case ElementTypes::Beam:
+            ElementList_ = new CBeam3D2[size];
+            break;
         case ElementTypes::H8:
             ElementList_ = new CHex8[size];
             break;
@@ -109,9 +116,10 @@ void CElementGroup::AllocateMaterials(std::size_t size)
         case ElementTypes::Bar:
             MaterialList_ = new CBarMaterial[size];
             break;
-        case ElementTypes::H8:
-            MaterialList_ = new CHex8Material[size];
+        case ElementTypes::Beam:
+            MaterialList_ = new CBeamMaterial[size];
             break;
+        case ElementTypes::H8:
         case ElementTypes::BbarH8:
             MaterialList_ = new CHex8Material[size];
             break;
