@@ -20,6 +20,7 @@ public:
 
     bool Read(std::ifstream& Input, CMaterial* MaterialSets, CNode* NodeList);
     void Write(COutputter& output);
+    void GenerateLocationMatrix();
     void ElementStiffness(double* Matrix);
     void ElementStress(double* stress, double* Displacement);
     void ElementBodyForce(double* bodyForce, const double gravity[3]);

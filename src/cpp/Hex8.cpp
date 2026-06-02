@@ -181,6 +181,15 @@ void CHex8::Write(COutputter& output)
            << setw(12) << ElementMaterial_->nset << endl;
 }
 
+// Generate location matrix
+void CHex8::GenerateLocationMatrix()
+{
+    unsigned int i = 0;
+    for (unsigned int N = 0; N < NEN_; N++)
+        for (unsigned int D = 0; D < 3; D++)
+            LocationMatrix_[i++] = nodes_[N]->bcode[D];
+}
+
 //	Calculate element stiffness matrix
 void CHex8::ElementStiffness(double* Matrix)
 {
@@ -200,9 +209,6 @@ void CHex8::ElementStiffness(double* Matrix)
 
     int nPoint = kUseReducedIntegration ? 1 : 2;
 
-    static int debugElemCount = 0;
-
-    double minDetJ = 1e100, maxDetJ = -1e100;
     for (int ir = 0; ir < nPoint; ir++)
     for (int is = 0; is < nPoint; is++)
     for (int it = 0; it < nPoint; it++)
@@ -219,9 +225,6 @@ void CHex8::ElementStiffness(double* Matrix)
         const CNode* nodePtr[8] = {nodes_[0], nodes_[1], nodes_[2], nodes_[3], nodes_[4], nodes_[5], nodes_[6], nodes_[7]};
         if (!ComputeJacobian(nodePtr, dNdr, dNds, dNdt, J, invJ, detJ))
             continue;
-
-        if (detJ < minDetJ) minDetJ = detJ;
-        if (detJ > maxDetJ) maxDetJ = detJ;
 
         double dNdx[8], dNdy[8], dNdz[8];
         for (int i = 0; i < 8; i++)
@@ -271,25 +274,6 @@ void CHex8::ElementStiffness(double* Matrix)
                     sum += B[k][i] * DB[k][j];
                 K[i][j] += sum * scale;
             }
-    }
-    // Debugging: print some diagnostics for first few elements
-    if (debugElemCount < 10)
-    {
-        debugElemCount++;
-        std::cout << "CHex8 Element diagnostics:\n";
-        std::cout << "  Nodes:";
-        for (int i = 0; i < 8; i++) std::cout << " " << nodes_[i]->NodeNumber;
-        std::cout << "\n";
-        if (material_)
-            std::cout << "  Material E=" << material_->E << " Nu=" << material_->Nu << " Density=" << material_->Density << "\n";
-        else
-            std::cout << "  Material pointer is NULL\n";
-
-        std::cout << "  LocationMatrix:";
-        for (unsigned int i = 0; i < (ND_ < 12 ? ND_ : 12); i++)
-            std::cout << " " << LocationMatrix_[i];
-        std::cout << "\n";
-        std::cout << "  detJ min=" << minDetJ << " max=" << maxDetJ << "\n";
     }
 
     int idx = 0;

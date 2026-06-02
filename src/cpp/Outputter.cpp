@@ -515,7 +515,7 @@ void COutputter::OutputElementStress()
 				*this << "  ELEMENT         SX           SY          SXY           MX           MY          MXY" << endl
 					  << "  NUMBER" << endl;
 
-				double stress[6];
+				double stress[7];
 
 				for (unsigned int Ele = 0; Ele < NUME; Ele++)
 				{

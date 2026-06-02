@@ -169,6 +169,14 @@ void CBbarHex8::Write(COutputter& output)
            << setw(12) << ElementMaterial_->nset << endl;
 }
 
+void CBbarHex8::GenerateLocationMatrix()
+{
+    unsigned int i = 0;
+    for (unsigned int N = 0; N < NEN_; N++)
+        for (unsigned int D = 0; D < 3; D++)
+            LocationMatrix_[i++] = nodes_[N]->bcode[D];
+}
+
 void CBbarHex8::ElementStiffness(double* Matrix)
 {
     clear(Matrix, SizeOfStiffnessMatrix());
