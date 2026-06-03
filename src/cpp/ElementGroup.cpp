@@ -143,7 +143,16 @@ void CElementGroup::AllocateMaterials(std::size_t size)
 bool CElementGroup::Read(ifstream& Input)
 {
     Input >> (int&)ElementType_ >> NUME_ >> NUMMAT_;
-    
+
+    return Read(Input, ElementType_, NUME_, NUMMAT_);
+}
+
+bool CElementGroup::Read(ifstream& Input, ElementTypes ElementType, unsigned int NUME, unsigned int NUMMAT)
+{
+    ElementType_ = ElementType;
+    NUME_ = NUME;
+    NUMMAT_ = NUMMAT;
+
     CalculateMemberSize();
 
 //  Read material/section property lines

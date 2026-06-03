@@ -70,6 +70,12 @@ int main(int argc, char *argv[])
 //  DiagonalAddress and StiffnessMatrix, and calculate the column heights
 //  and address of diagonal elements
 	FEMData->AllocateMatrices();
+
+    if (FEMData->GetMODEX() == 2)
+    {
+        *Output << "Matrix check completed !" << endl << endl;
+        return 0;
+    }
     
 //  Assemble the banded gloabl stiffness matrix
 	FEMData->AssembleStiffnessMatrix();

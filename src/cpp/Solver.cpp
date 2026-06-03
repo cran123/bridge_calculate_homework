@@ -14,12 +14,66 @@
 #include <cfloat>
 #include <iostream>
 #include <algorithm>
+#include <vector>
 
 using namespace std;
+
+CLDLTSolver::CLDLTSolver(CSkylineMatrix<double>* K)
+    : K(*K)
+#ifdef STAPPP_USE_EIGEN
+    , Factorized_(false)
+#endif
+{
+}
+
+#ifdef STAPPP_USE_EIGEN
+namespace
+{
+    Eigen::SparseMatrix<double> BuildEigenSparseMatrix(CSkylineMatrix<double>& K)
+    {
+        const unsigned int N = K.dim();
+        unsigned int* ColumnHeights = K.GetColumnHeights();
+        vector<Eigen::Triplet<double> > triplets;
+
+        for (unsigned int j = 1; j <= N; j++)
+        {
+            unsigned int first = j - ColumnHeights[j - 1];
+            for (unsigned int i = first; i <= j; i++)
+            {
+                double value = K(i, j);
+                if (fabs(value) <= 0.0)
+                    continue;
+
+                triplets.push_back(Eigen::Triplet<double>(i - 1, j - 1, value));
+                if (i != j)
+                    triplets.push_back(Eigen::Triplet<double>(j - 1, i - 1, value));
+            }
+        }
+
+        Eigen::SparseMatrix<double> sparse(N, N);
+        sparse.setFromTriplets(triplets.begin(), triplets.end());
+        sparse.makeCompressed();
+        return sparse;
+    }
+}
+#endif
 
 // LDLT facterization
 void CLDLTSolver::LDLT()
 {
+#ifdef STAPPP_USE_EIGEN
+    SparseK_ = BuildEigenSparseMatrix(K);
+    Solver_.analyzePattern(SparseK_);
+    Solver_.factorize(SparseK_);
+    if (Solver_.info() != Eigen::Success)
+    {
+        cerr << "*** Error *** Eigen SimplicialLDLT factorization failed." << endl;
+        exit(4);
+    }
+
+    Factorized_ = true;
+    return;
+#else
 	unsigned int N = K.dim();
     unsigned int* ColumnHeights = K.GetColumnHeights();   // Column Hights
 
@@ -56,11 +110,32 @@ void CLDLTSolver::LDLT()
             exit(4);
         }
     }
+#endif
 };
 
 // Solve displacement by back substitution
 void CLDLTSolver::BackSubstitution(double* Force)
 {
+#ifdef STAPPP_USE_EIGEN
+    if (!Factorized_)
+        LDLT();
+
+    const unsigned int N = K.dim();
+    Eigen::VectorXd rhs(N);
+    for (unsigned int i = 0; i < N; i++)
+        rhs[i] = Force[i];
+
+    Eigen::VectorXd solution = Solver_.solve(rhs);
+    if (Solver_.info() != Eigen::Success)
+    {
+        cerr << "*** Error *** Eigen SimplicialLDLT solve failed." << endl;
+        exit(4);
+    }
+
+    for (unsigned int i = 0; i < N; i++)
+        Force[i] = solution[i];
+    return;
+#else
 	unsigned int N = K.dim();
     unsigned int* ColumnHeights = K.GetColumnHeights();   // Column Hights
 
@@ -84,4 +159,5 @@ void CLDLTSolver::BackSubstitution(double* Force)
 		for (unsigned int i = mj; i <= j-1; i++)	// Loop for i=mj:j-1
 			Force[i-1] -= K(i,j) * Force[j-1];	// a_i = Vbar_i - sum_j(L_ij Vbar_j)
 	}
+#endif
 };

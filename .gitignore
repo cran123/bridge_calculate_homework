@@ -16,3 +16,5 @@ results/
 *.user
 data/
 tests/
+build_eigen_check/
+    

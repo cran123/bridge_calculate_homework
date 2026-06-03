@@ -17,7 +17,22 @@
 #include "LoadCaseData.h"
 #include "SkylineMatrix.h"
 
+#include <vector>
+
 using namespace std;
+
+struct CMpcTerm
+{
+	unsigned int node;
+	unsigned int dof;
+	double coefficient;
+};
+
+struct CMpcConstraint
+{
+	vector<CMpcTerm> terms;
+	vector<unsigned int> equations;
+};
 
 //!	Clear an array
 template <class type> void clear( type* a, unsigned int N );
@@ -78,6 +93,18 @@ private:
 //!	Penalty factor for displacement boundary conditions
 	double DisplacementPenalty_;
 
+//!	Penalty factor for multi-point constraints
+	double MpcPenalty_;
+
+//!	Multi-point constraints
+	vector<CMpcConstraint> MpcConstraints_;
+
+//!	Element group header already read when parsing legacy input
+	bool HasBufferedElementHeader_;
+	ElementTypes BufferedElementType_;
+	unsigned int BufferedNUME_;
+	unsigned int BufferedNUMMAT_;
+
 private:
 
 //!	Constructor
@@ -99,6 +126,9 @@ public:
 
 //!	Read load case data
 	bool ReadLoadCases();
+
+//!	Read optional multi-point constraints
+	bool ReadMultiPointConstraints();
 
 //!	Read element data
 	bool ReadElements();
@@ -122,6 +152,9 @@ public:
 
 //!	Apply penalty terms for displacement boundary conditions
 	void ApplyDisplacementPenalty();
+
+//!	Apply penalty terms for multi-point constraints
+	void ApplyMultiPointConstraintPenalty();
 
 //!	Return solution mode
 	inline unsigned int GetMODEX() { return MODEX; }

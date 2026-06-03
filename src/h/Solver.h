@@ -12,6 +12,10 @@
 
 #include "SkylineMatrix.h"
 
+#ifdef STAPPP_USE_EIGEN
+#include <Eigen/Sparse>
+#endif
+
 //!	LDLT solver: A in core solver using skyline storage  and column reduction scheme
 class CLDLTSolver
 {
@@ -19,10 +23,16 @@ private:
     
     CSkylineMatrix<double>& K;
 
+#ifdef STAPPP_USE_EIGEN
+    Eigen::SparseMatrix<double> SparseK_;
+    Eigen::SimplicialLDLT<Eigen::SparseMatrix<double> > Solver_;
+    bool Factorized_;
+#endif
+
 public:
 
 //!	Constructor
-	CLDLTSolver(CSkylineMatrix<double>* K): K(*K) {};
+	CLDLTSolver(CSkylineMatrix<double>* K);
 
 //!	Perform L*D*L(T) factorization of the stiffness matrix
 	void LDLT();

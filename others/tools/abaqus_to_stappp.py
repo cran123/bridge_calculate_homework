@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+from collections import deque
 import math
 
 
@@ -450,48 +451,302 @@ def nearest_node(source, candidates, nodes):
     return best
 
 
-def merge_tied_nodes(nodes, node_map, flat_elements, assembly_nsets, assembly_surfaces, ties):
-    parent = {nid: nid for nid in nodes}
+def surface_nodes(surface_name, assembly_nsets, assembly_surfaces, node_map):
+    result = []
+    for set_name in assembly_surfaces.get(surface_name, []):
+        for inst, local_id in assembly_nsets.get(set_name, []):
+            gid = node_map.get((inst, local_id))
+            if gid is not None:
+                result.append(gid)
+    return sorted(dict.fromkeys(result))
 
-    def find(nid):
-        while parent[nid] != nid:
-            parent[nid] = parent[parent[nid]]
-            nid = parent[nid]
-        return nid
 
-    def union(slave, master):
-        parent[find(slave)] = find(master)
+def inverse_distance_weights(source, candidates, nodes, limit=4):
+    sx, sy, sz = nodes[source]
+    distances = []
+    for candidate in candidates:
+        cx, cy, cz = nodes[candidate]
+        d2 = (sx - cx) ** 2 + (sy - cy) ** 2 + (sz - cz) ** 2
+        if d2 <= 1.0e-24:
+            return [(candidate, 1.0)]
+        distances.append((d2, candidate))
 
-    def surface_nodes(surface_name):
-        result = []
-        for set_name in assembly_surfaces.get(surface_name, []):
-            for inst, local_id in assembly_nsets.get(set_name, []):
-                gid = node_map.get((inst, local_id))
-                if gid is not None:
-                    result.append(gid)
-        return result
+    distances.sort()
+    chosen = distances[:max(1, min(limit, len(distances)))]
+    inv = [(candidate, 1.0 / math.sqrt(d2)) for d2, candidate in chosen]
+    total = sum(weight for _candidate, weight in inv)
+    if total <= 0.0:
+        return [(chosen[0][1], 1.0)]
+    return [(candidate, weight / total) for candidate, weight in inv]
 
-    merged_pairs = 0
+
+def quad_shape_weights(xi, eta):
+    return (
+        0.25 * (1.0 - xi) * (1.0 - eta),
+        0.25 * (1.0 + xi) * (1.0 - eta),
+        0.25 * (1.0 + xi) * (1.0 + eta),
+        0.25 * (1.0 - xi) * (1.0 + eta),
+    )
+
+
+def vec_add(a, b):
+    return (a[0] + b[0], a[1] + b[1], a[2] + b[2])
+
+
+def vec_sub(a, b):
+    return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
+
+
+def vec_scale(a, s):
+    return (a[0] * s, a[1] * s, a[2] * s)
+
+
+def dot(a, b):
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+
+def norm2(a):
+    return dot(a, a)
+
+
+def project_to_line(source, conn, nodes):
+    p = nodes[source]
+    a = nodes[conn[0]]
+    b = nodes[conn[1]]
+    ab = vec_sub(b, a)
+    denom = norm2(ab)
+    if denom <= 1.0e-24:
+        return None
+    t = max(0.0, min(1.0, dot(vec_sub(p, a), ab) / denom))
+    q = vec_add(a, vec_scale(ab, t))
+    return norm2(vec_sub(q, p)), [(conn[0], 1.0 - t), (conn[1], t)]
+
+
+def quad_point_and_derivatives(conn, nodes, xi, eta):
+    n = quad_shape_weights(xi, eta)
+    dxi = (
+        -0.25 * (1.0 - eta),
+         0.25 * (1.0 - eta),
+         0.25 * (1.0 + eta),
+        -0.25 * (1.0 + eta),
+    )
+    deta = (
+        -0.25 * (1.0 - xi),
+        -0.25 * (1.0 + xi),
+         0.25 * (1.0 + xi),
+         0.25 * (1.0 - xi),
+    )
+    q = (0.0, 0.0, 0.0)
+    q_xi = (0.0, 0.0, 0.0)
+    q_eta = (0.0, 0.0, 0.0)
+    for i, nid in enumerate(conn):
+        xyz = nodes[nid]
+        q = vec_add(q, vec_scale(xyz, n[i]))
+        q_xi = vec_add(q_xi, vec_scale(xyz, dxi[i]))
+        q_eta = vec_add(q_eta, vec_scale(xyz, deta[i]))
+    return q, q_xi, q_eta
+
+
+def project_to_quad(source, conn, nodes):
+    p = nodes[source]
+    xi = 0.0
+    eta = 0.0
+    for _ in range(12):
+        q, q_xi, q_eta = quad_point_and_derivatives(conn, nodes, xi, eta)
+        r = vec_sub(q, p)
+        a11 = dot(q_xi, q_xi)
+        a12 = dot(q_xi, q_eta)
+        a22 = dot(q_eta, q_eta)
+        b1 = dot(q_xi, r)
+        b2 = dot(q_eta, r)
+        det = a11 * a22 - a12 * a12
+        if abs(det) <= 1.0e-24:
+            break
+        dxi = (-b1 * a22 + b2 * a12) / det
+        deta = (-a11 * b2 + a12 * b1) / det
+        xi = max(-1.0, min(1.0, xi + dxi))
+        eta = max(-1.0, min(1.0, eta + deta))
+        if dxi * dxi + deta * deta <= 1.0e-20:
+            break
+
+    q, _q_xi, _q_eta = quad_point_and_derivatives(conn, nodes, xi, eta)
+    weights = quad_shape_weights(xi, eta)
+    return norm2(vec_sub(q, p)), [(conn[i], weights[i]) for i in range(4)]
+
+
+def surface_facets(master_nodes, flat_elements):
+    master_set = set(master_nodes)
+    facets = []
+    h8_faces = (
+        (0, 1, 2, 3),
+        (4, 5, 6, 7),
+        (0, 1, 5, 4),
+        (1, 2, 6, 5),
+        (2, 3, 7, 6),
+        (3, 0, 4, 7),
+    )
+    for etype in ("C3D8R", "C3D8"):
+        for _eid, conn, _part_name, _elset in flat_elements[etype]:
+            for face in h8_faces:
+                face_conn = tuple(conn[i] for i in face)
+                if all(nid in master_set for nid in face_conn):
+                    facets.append(("quad", face_conn))
+    for _eid, conn, _part_name, _elset in flat_elements["S4R"]:
+        if all(nid in master_set for nid in conn):
+            facets.append(("quad", tuple(conn)))
+    for _eid, conn, _part_name, _elset in flat_elements["B31"]:
+        if all(nid in master_set for nid in conn):
+            facets.append(("line", tuple(conn)))
+    return facets
+
+
+def master_surface_weights(source, master_nodes, flat_elements, nodes):
+    best = None
+    for kind, conn in surface_facets(master_nodes, flat_elements):
+        projected = project_to_quad(source, conn, nodes) if kind == "quad" else project_to_line(source, conn, nodes)
+        if projected is None:
+            continue
+        distance2, weights = projected
+        if best is None or distance2 < best[0]:
+            best = (distance2, weights)
+    if best is not None:
+        return best[1]
+    return inverse_distance_weights(source, master_nodes, nodes)
+
+
+def node_element_kinds(flat_elements):
+    kinds = {}
+    for etype, elems in flat_elements.items():
+        if etype in ("S4R", "B31"):
+            has_rotation = True
+        else:
+            has_rotation = False
+        for _eid, conn, _part_name, _elset in elems:
+            for nid in conn:
+                entry = kinds.setdefault(nid, {"rotation": False, "solid": False})
+                entry["rotation"] = entry["rotation"] or has_rotation
+                entry["solid"] = entry["solid"] or etype in ("C3D8", "C3D8R")
+    return kinds
+
+
+def add_mpc_term(terms, node, dof, coefficient):
+    if abs(coefficient) <= 1.0e-14:
+        return
+    key = (node, dof)
+    terms[key] = terms.get(key, 0.0) + coefficient
+
+
+def compact_mpc_terms(terms):
+    return [(node, dof, coeff) for (node, dof), coeff in sorted(terms.items())
+            if abs(coeff) > 1.0e-14]
+
+
+def build_tie_mpcs(nodes, node_map, flat_elements, assembly_nsets, assembly_surfaces, ties):
+    kinds = node_element_kinds(flat_elements)
+    mpcs = []
+    generated = 0
+
     for slave_surface, master_surface in ties:
-        slave_nodes = surface_nodes(slave_surface)
-        master_nodes = surface_nodes(master_surface)
+        slave_nodes = surface_nodes(slave_surface, assembly_nsets, assembly_surfaces, node_map)
+        master_nodes = surface_nodes(master_surface, assembly_nsets, assembly_surfaces, node_map)
         if not slave_nodes or not master_nodes:
             continue
-        for slave in slave_nodes:
-            master = nearest_node(slave, master_nodes, nodes)
-            if master is not None:
-                union(slave, master)
-                merged_pairs += 1
 
-    rep_to_new = {}
-    old_to_new = {}
-    new_nodes = {}
-    for old_id in sorted(nodes):
-        rep = find(old_id)
-        if rep not in rep_to_new:
-            rep_to_new[rep] = len(rep_to_new) + 1
-            new_nodes[rep_to_new[rep]] = nodes[rep]
-        old_to_new[old_id] = rep_to_new[rep]
+        for slave in slave_nodes:
+            weights = master_surface_weights(slave, master_nodes, flat_elements, nodes)
+            sx, sy, sz = nodes[slave]
+            cx = sum(nodes[nid][0] * weight for nid, weight in weights)
+            cy = sum(nodes[nid][1] * weight for nid, weight in weights)
+            cz = sum(nodes[nid][2] * weight for nid, weight in weights)
+            rx, ry, rz = sx - cx, sy - cy, sz - cz
+
+            slave_has_rot = kinds.get(slave, {}).get("rotation", False)
+            master_has_rot = bool(weights) and all(kinds.get(nid, {}).get("rotation", False) for nid, _w in weights)
+            master_is_solid = bool(weights) and any(kinds.get(nid, {}).get("solid", False) for nid, _w in weights)
+
+            for comp in range(3):
+                terms = {}
+                add_mpc_term(terms, slave, comp + 1, 1.0)
+                for master, weight in weights:
+                    add_mpc_term(terms, master, comp + 1, -weight)
+
+                if slave_has_rot and master_is_solid:
+                    # u + theta x r. DOF order: ux,uy,uz,rx,ry,rz.
+                    if comp == 0:
+                        add_mpc_term(terms, slave, 5, rz)
+                        add_mpc_term(terms, slave, 6, -ry)
+                    elif comp == 1:
+                        add_mpc_term(terms, slave, 4, -rz)
+                        add_mpc_term(terms, slave, 6, rx)
+                    else:
+                        add_mpc_term(terms, slave, 4, ry)
+                        add_mpc_term(terms, slave, 5, -rx)
+
+                compact = compact_mpc_terms(terms)
+                if len(compact) >= 2:
+                    mpcs.append(compact)
+                    generated += 1
+
+            if slave_has_rot and master_has_rot:
+                for dof in range(4, 7):
+                    terms = {}
+                    add_mpc_term(terms, slave, dof, 1.0)
+                    for master, weight in weights:
+                        add_mpc_term(terms, master, dof, -weight)
+                    compact = compact_mpc_terms(terms)
+                    if len(compact) >= 2:
+                        mpcs.append(compact)
+                        generated += 1
+
+    return mpcs, generated
+
+
+def build_node_adjacency(nodes, flat_elements):
+    adjacency = {nid: set() for nid in nodes}
+    for elems in flat_elements.values():
+        for _eid, conn, _part_name, _elset in elems:
+            unique_conn = list(dict.fromkeys(conn))
+            for i, nid in enumerate(unique_conn):
+                neighbors = adjacency[nid]
+                for other in unique_conn[:i]:
+                    neighbors.add(other)
+                for other in unique_conn[i + 1:]:
+                    neighbors.add(other)
+    return adjacency
+
+
+def rcm_order(nodes, flat_elements):
+    adjacency = build_node_adjacency(nodes, flat_elements)
+    degrees = {nid: len(neighbors) for nid, neighbors in adjacency.items()}
+    visited = set()
+    cm_order = []
+
+    for root in sorted(nodes, key=lambda nid: (degrees[nid], nid)):
+        if root in visited:
+            continue
+        queue = deque([root])
+        visited.add(root)
+        while queue:
+            nid = queue.popleft()
+            cm_order.append(nid)
+            neighbors = [n for n in adjacency[nid] if n not in visited]
+            neighbors.sort(key=lambda n: (degrees[n], n))
+            for neighbor in neighbors:
+                visited.add(neighbor)
+                queue.append(neighbor)
+
+    cm_order.reverse()
+    return cm_order
+
+
+def renumber_nodes(nodes, node_map, flat_elements, method):
+    if method == "none":
+        return nodes, node_map, flat_elements
+    if method != "rcm":
+        raise ValueError(f"Unsupported renumbering method: {method}")
+
+    old_to_new = {old_id: new_id for new_id, old_id in enumerate(rcm_order(nodes, flat_elements), start=1)}
+    new_nodes = {old_to_new[old_id]: coord for old_id, coord in nodes.items()}
 
     for key, old_id in list(node_map.items()):
         node_map[key] = old_to_new[old_id]
@@ -500,7 +755,7 @@ def merge_tied_nodes(nodes, node_map, flat_elements, assembly_nsets, assembly_su
         for idx, (eid, conn, part_name, elset) in enumerate(elems):
             flat_elements[etype][idx] = (eid, [old_to_new[nid] for nid in conn], part_name, elset)
 
-    return new_nodes, node_map, flat_elements, merged_pairs
+    return new_nodes, node_map, flat_elements
 
 
 def apply_boundaries(boundary_specs, assembly_nsets, node_map):
@@ -579,9 +834,10 @@ def write_group(f, element_type, elements, mats, mat_map, parts, materials, kind
 
 
 def write_dat(path, parts, instances, materials, assembly_nsets, assembly_surfaces, ties,
-              boundaries, loads, gravity, cli_gravity):
+              boundaries, loads, gravity, cli_gravity, renumber, mode):
     nodes, node_map, flat_elements = flatten_model(parts, instances)
-    nodes, node_map, flat_elements, merged_pairs = merge_tied_nodes(
+    nodes, node_map, flat_elements = renumber_nodes(nodes, node_map, flat_elements, renumber)
+    mpcs, generated_mpcs = build_tie_mpcs(
         nodes, node_map, flat_elements, assembly_nsets, assembly_surfaces, ties)
     bcs = apply_boundaries(boundaries, assembly_nsets, node_map)
     rotation_flags = node_rotation_flags(nodes, flat_elements)
@@ -613,7 +869,7 @@ def write_dat(path, parts, instances, materials, assembly_nsets, assembly_surfac
 
     with open(path, "w", encoding="utf-8") as f:
         f.write("Converted from Abaqus inp\n")
-        f.write(f"{len(nodes)} {len(group_specs)} 1 1\n")
+        f.write(f"{len(nodes)} {len(group_specs)} 1 {mode}\n")
 
         for nid in sorted(nodes):
             bc = [0, 0, 0, *rotation_flags[nid]]
@@ -629,6 +885,12 @@ def write_dat(path, parts, instances, materials, assembly_nsets, assembly_surfac
         for nid, dof, val in mapped_loads:
             f.write(f"{nid} {dof} {val}\n")
 
+        f.write(f"{len(mpcs)}\n")
+        for mpc in mpcs:
+            f.write(f"{len(mpc)}\n")
+            for nid, dof, coeff in mpc:
+                f.write(f"{nid} {dof} {coeff:.16g}\n")
+
         for element_type, elems, mats, mat_map, kind in group_specs:
             write_group(f, element_type, elems, mats, mat_map, parts, materials, kind)
 
@@ -641,7 +903,8 @@ def write_dat(path, parts, instances, materials, assembly_nsets, assembly_surfac
         "materials": len(materials),
         "bcs": sum(sum(bc) for bc in bcs.values()),
         "ties": len(ties),
-        "merged_pairs": merged_pairs,
+        "mpcs": generated_mpcs,
+        "renumber": renumber,
         "load_cases": 1,
         "gravity": gravity_flag,
     }
@@ -651,6 +914,10 @@ def main():
     parser = argparse.ArgumentParser(description="Convert Abaqus .inp to STAPpp .dat")
     parser.add_argument("inp", help="Input .inp file")
     parser.add_argument("-o", "--output", help="Output .dat file", default=None)
+    parser.add_argument("--renumber", choices=("none", "rcm"), default="none",
+                        help="Node renumbering method")
+    parser.add_argument("--mode", type=int, choices=(0, 1, 2), default=1,
+                        help="STAP++ MODEX: 0=data check, 1=solve, 2=matrix check")
     parser.add_argument("--gravity", nargs=3, type=float, metavar=("GX", "GY", "GZ"),
                         help="Gravity vector if inp has no *Dload,GRAV")
     args = parser.parse_args()
@@ -661,7 +928,8 @@ def main():
 
     parts, instances, materials, assembly_nsets, assembly_surfaces, ties, boundaries, loads, gravity = parse_inp(args.inp)
     stats = write_dat(output, parts, instances, materials, assembly_nsets, assembly_surfaces, ties,
-                      boundaries, loads, gravity, tuple(args.gravity) if args.gravity else None)
+                      boundaries, loads, gravity, tuple(args.gravity) if args.gravity else None,
+                      args.renumber, args.mode)
 
     print(f"Nodes: {stats['nodes']}")
     print(f"C3D8R/H8: {stats['h8']}")
@@ -671,7 +939,8 @@ def main():
     print(f"Materials: {stats['materials']}")
     print(f"Boundary DOFs: {stats['bcs']}")
     print(f"Tie constraints: {stats['ties']}")
-    print(f"Tie node merges: {stats['merged_pairs']}")
+    print(f"Tie MPC equations: {stats['mpcs']}")
+    print(f"Renumbering: {stats['renumber']}")
     print(f"Load cases: {stats['load_cases']}")
     print(f"Gravity load: {stats['gravity']}")
 

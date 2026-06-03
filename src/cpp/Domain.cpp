@@ -12,6 +12,9 @@
 #include "Material.h"
 
 #include <cmath>
+#include <cstdlib>
+#include <sstream>
+#include <string>
 
 using namespace std;
 
@@ -45,6 +48,11 @@ CDomain::CDomain()
 	Force = nullptr;
 	StiffnessMatrix = nullptr;
 	DisplacementPenalty_ = 0.0;
+	MpcPenalty_ = 0.0;
+	HasBufferedElementHeader_ = false;
+	BufferedElementType_ = ElementTypes::UNDEFINED;
+	BufferedNUME_ = 0;
+	BufferedNUMMAT_ = 0;
 }
 
 //	Desconstructor
@@ -106,6 +114,10 @@ bool CDomain::ReadData(string FileName, string OutFile)
     else
         return false;
 
+//	Read optional multi-point constraints
+	if (!ReadMultiPointConstraints())
+		return false;
+
 //	Read element data
 	if (ReadElements())
         Output->OutputElementInfo();
@@ -113,6 +125,23 @@ bool CDomain::ReadData(string FileName, string OutFile)
         return false;
 
 	return true;
+}
+
+namespace
+{
+	bool ReadNextDataLine(ifstream& input, string& line)
+	{
+		while (getline(input, line))
+		{
+			size_t first = line.find_first_not_of(" \t\r\n");
+			if (first == string::npos)
+				continue;
+			if (line[first] == '#')
+				continue;
+			return true;
+		}
+		return false;
+	}
 }
 
 //	Read nodal point data
@@ -187,6 +216,61 @@ bool CDomain::ReadLoadCases()
 	return true;
 }
 
+bool CDomain::ReadMultiPointConstraints()
+{
+	string line;
+	if (!ReadNextDataLine(Input, line))
+		return true;
+
+	istringstream header(line);
+	vector<double> values;
+	double value;
+	while (header >> value)
+		values.push_back(value);
+
+	if (values.empty())
+		return true;
+
+	if (values.size() >= 3)
+	{
+		BufferedElementType_ = static_cast<ElementTypes>(static_cast<int>(values[0]));
+		BufferedNUME_ = static_cast<unsigned int>(values[1]);
+		BufferedNUMMAT_ = static_cast<unsigned int>(values[2]);
+		HasBufferedElementHeader_ = true;
+		return true;
+	}
+
+	unsigned int nmpc = static_cast<unsigned int>(values[0]);
+	MpcConstraints_.clear();
+	MpcConstraints_.reserve(nmpc);
+
+	for (unsigned int i = 0; i < nmpc; i++)
+	{
+		unsigned int nterms;
+		Input >> nterms;
+
+		CMpcConstraint constraint;
+		constraint.terms.reserve(nterms);
+		constraint.equations.reserve(nterms);
+
+		for (unsigned int j = 0; j < nterms; j++)
+		{
+			CMpcTerm term;
+			Input >> term.node >> term.dof >> term.coefficient;
+			constraint.terms.push_back(term);
+
+			unsigned int eq = 0;
+			if (term.node >= 1 && term.node <= NUMNP && term.dof >= 1 && term.dof <= CNode::NDF)
+				eq = NodeList[term.node - 1].bcode[term.dof - 1];
+			constraint.equations.push_back(eq);
+		}
+
+		MpcConstraints_.push_back(constraint);
+	}
+
+	return true;
+}
+
 // Read element data
 bool CDomain::ReadElements()
 {
@@ -194,8 +278,17 @@ bool CDomain::ReadElements()
 
 //	Loop over for all element group
 	for (unsigned int EleGrp = 0; EleGrp < NUMEG; EleGrp++)
-        if (!EleGrpList[EleGrp].Read(Input))
-            return false;
+	{
+		if (EleGrp == 0 && HasBufferedElementHeader_)
+		{
+			if (!EleGrpList[EleGrp].Read(Input, BufferedElementType_, BufferedNUME_, BufferedNUMMAT_))
+				return false;
+		}
+		else if (!EleGrpList[EleGrp].Read(Input))
+		{
+			return false;
+		}
+	}
     
     return true;
 }
@@ -232,6 +325,13 @@ void CDomain::CalculateColumnHeights()
             StiffnessMatrix->CalculateColumnHeight(Element.GetLocationMatrix(), Element.GetND());
         }
     }
+
+	for (unsigned int mpc = 0; mpc < MpcConstraints_.size(); mpc++)
+	{
+		CMpcConstraint& constraint = MpcConstraints_[mpc];
+		if (!constraint.equations.empty())
+			StiffnessMatrix->CalculateColumnHeight(&constraint.equations[0], constraint.equations.size());
+	}
     
     StiffnessMatrix->CalculateMaximumHalfBandwidth();
     
@@ -289,11 +389,54 @@ void CDomain::AssembleStiffnessMatrix()
 		Matrix = nullptr;
 	}
 
+	ApplyMultiPointConstraintPenalty();
+
 #ifdef _DEBUG_
 	COutputter* Output = COutputter::GetInstance();
 	Output->PrintStiffnessMatrix();
 #endif
 
+}
+
+void CDomain::ApplyMultiPointConstraintPenalty()
+{
+	if (!StiffnessMatrix || MpcConstraints_.empty())
+		return;
+
+	double maxDiag = 0.0;
+	for (unsigned int i = 1; i <= NEQ; i++)
+	{
+		double v = fabs((*StiffnessMatrix)(i, i));
+		if (v > maxDiag)
+			maxDiag = v;
+	}
+
+	if (maxDiag <= 0.0)
+		maxDiag = 1.0;
+
+	MpcPenalty_ = maxDiag * 1.0e8;
+
+	for (unsigned int mpc = 0; mpc < MpcConstraints_.size(); mpc++)
+	{
+		CMpcConstraint& constraint = MpcConstraints_[mpc];
+		for (unsigned int j = 0; j < constraint.terms.size(); j++)
+		{
+			unsigned int eqj = constraint.equations[j];
+			if (!eqj)
+				continue;
+
+			double cj = constraint.terms[j].coefficient;
+			for (unsigned int i = 0; i <= j; i++)
+			{
+				unsigned int eqi = constraint.equations[i];
+				if (!eqi)
+					continue;
+
+				double ci = constraint.terms[i].coefficient;
+				(*StiffnessMatrix)(eqi, eqj) += MpcPenalty_ * ci * cj;
+			}
+		}
+	}
 }
 
 //	Apply penalty terms for displacement boundary conditions

@@ -9,3 +9,59 @@ STAP++ is a cross-platform FEM code, which can be build on Windows, Linux and ma
 STAP++ is developed and maintained by the Computational Dynamics Laboratory (http://www.comdyn.cn/), School of Aerospace Engineering, Tsinghua University, China. Your feedbacks are welcome.
 
 The documentation of STAP++ can be found at https://xzhang66.github.io/stappp/index.html.
+
+## Build
+
+This repository uses CMake. Configure from the `make` directory:
+
+```powershell
+cmake -S .\make -B .\build
+cmake --build .\build --config Debug
+```
+
+On Linux or macOS:
+
+```sh
+cmake -S ./make -B ./build
+cmake --build ./build
+```
+
+## Eigen Sparse Solver
+
+STAP++ uses Eigen's sparse direct solver by default:
+
+- `Eigen::SparseMatrix<double>`
+- `Eigen::SimplicialLDLT`
+
+Eigen is included as a Git submodule at:
+
+```text
+third_party/eigen
+```
+
+Clone the repository with submodules:
+
+```powershell
+git clone --recursive <repository-url>
+```
+
+If the repository has already been cloned, initialize the submodule with:
+
+```powershell
+git submodule update --init --recursive
+```
+
+CMake first tries to find a system Eigen3 installation. If none is found, it uses the bundled submodule at `third_party/eigen`.
+
+To force the legacy skyline LDLT solver instead of Eigen:
+
+```powershell
+cmake -S .\make -B .\build -DSTAPPP_USE_EIGEN_SOLVER=OFF
+cmake --build .\build --config Debug
+```
+
+When Eigen is enabled, the CMake configure step prints:
+
+```text
+Using Eigen3 sparse solver
+```
