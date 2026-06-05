@@ -13,15 +13,20 @@
 #include <cmath>
 #include <cfloat>
 #include <iostream>
+#include <iomanip>
 #include <algorithm>
+#include <map>
+#include <set>
 #include <vector>
 
 using namespace std;
 
-CLDLTSolver::CLDLTSolver(CSkylineMatrix<double>* K)
+CLDLTSolver::CLDLTSolver(CSkylineMatrix<double>* K, const vector<CMpcConstraint>& MpcConstraints)
     : K(*K)
+    , MpcConstraints_(MpcConstraints)
 #ifdef STAPPP_USE_EIGEN
     , Factorized_(false)
+    , UseSparseLU_(false)
 #endif
 {
 }
@@ -55,6 +60,194 @@ namespace
         sparse.makeCompressed();
         return sparse;
     }
+
+    Eigen::SparseMatrix<double> BuildConstraintTransform(unsigned int N,
+        const vector<CMpcConstraint>& constraints, vector<int>& reducedIndex)
+    {
+        vector<int> slaveOf(N, -1);
+        vector<vector<pair<unsigned int, double> > > slaveRelations(N);
+
+        for (unsigned int c = 0; c < constraints.size(); c++)
+        {
+            const CMpcConstraint& constraint = constraints[c];
+            int slave = -1;
+            double slaveCoef = 0.0;
+            for (unsigned int i = 0; i < constraint.terms.size(); i++)
+            {
+                unsigned int eq = constraint.equations[i];
+                if (!eq)
+                    continue;
+                double coef = constraint.terms[i].coefficient;
+                if (fabs(coef - 1.0) <= 1.0e-12)
+                {
+                    slave = static_cast<int>(eq - 1);
+                    slaveCoef = coef;
+                    break;
+                }
+            }
+
+            if (slave < 0)
+                continue;
+            if (slaveOf[slave] >= 0)
+            {
+                cerr << "*** Error *** MPC slave equation appears in more than one constraint." << endl;
+                exit(4);
+            }
+
+            slaveOf[slave] = static_cast<int>(c);
+            for (unsigned int i = 0; i < constraint.terms.size(); i++)
+            {
+                unsigned int eq = constraint.equations[i];
+                if (!eq || static_cast<int>(eq - 1) == slave)
+                    continue;
+                double coef = -constraint.terms[i].coefficient / slaveCoef;
+                slaveRelations[slave].push_back(make_pair(eq - 1, coef));
+            }
+        }
+
+        reducedIndex.assign(N, -1);
+        unsigned int reduced = 0;
+        for (unsigned int eq = 0; eq < N; eq++)
+        {
+            if (slaveOf[eq] < 0)
+                reducedIndex[eq] = reduced++;
+        }
+
+        vector<Eigen::Triplet<double> > triplets;
+        triplets.reserve(N + constraints.size() * 4);
+
+        vector<int> state(N, 0);
+        vector<vector<pair<unsigned int, double> > > expandedRelations(N);
+
+        struct Expander
+        {
+            const vector<int>& slaveOf;
+            const vector<vector<pair<unsigned int, double> > >& slaveRelations;
+            vector<int>& state;
+            vector<vector<pair<unsigned int, double> > >& expandedRelations;
+
+            vector<pair<unsigned int, double> > Expand(unsigned int eq)
+            {
+                if (slaveOf[eq] < 0)
+                    return vector<pair<unsigned int, double> >(1, make_pair(eq, 1.0));
+
+                if (state[eq] == 2)
+                    return expandedRelations[eq];
+                if (state[eq] == 1)
+                {
+                    cerr << "*** Error *** Cyclic MPC dependency detected." << endl;
+                    exit(4);
+                }
+
+                state[eq] = 1;
+                map<unsigned int, double> merged;
+                for (unsigned int i = 0; i < slaveRelations[eq].size(); i++)
+                {
+                    unsigned int masterEq = slaveRelations[eq][i].first;
+                    double coef = slaveRelations[eq][i].second;
+                    vector<pair<unsigned int, double> > terms = Expand(masterEq);
+                    for (unsigned int j = 0; j < terms.size(); j++)
+                        merged[terms[j].first] += coef * terms[j].second;
+                }
+
+                for (map<unsigned int, double>::iterator it = merged.begin(); it != merged.end(); ++it)
+                    if (fabs(it->second) > 1.0e-14)
+                        expandedRelations[eq].push_back(make_pair(it->first, it->second));
+
+                state[eq] = 2;
+                return expandedRelations[eq];
+            }
+        };
+
+        Expander expander = { slaveOf, slaveRelations, state, expandedRelations };
+
+        for (unsigned int eq = 0; eq < N; eq++)
+        {
+            if (slaveOf[eq] < 0)
+            {
+                triplets.push_back(Eigen::Triplet<double>(eq, reducedIndex[eq], 1.0));
+                continue;
+            }
+
+            vector<pair<unsigned int, double> > terms = expander.Expand(eq);
+            for (unsigned int i = 0; i < terms.size(); i++)
+            {
+                unsigned int masterEq = terms[i].first;
+                double coef = terms[i].second;
+                int col = reducedIndex[masterEq];
+                triplets.push_back(Eigen::Triplet<double>(eq, col, coef));
+            }
+        }
+
+        Eigen::SparseMatrix<double> transform(N, reduced);
+        transform.setFromTriplets(triplets.begin(), triplets.end());
+        transform.makeCompressed();
+        return transform;
+    }
+
+    void PrintReducedMatrixDiagnostics(const Eigen::SparseMatrix<double>& matrix,
+        const vector<int>& reducedIndex)
+    {
+        vector<double> diagonal(matrix.rows(), 0.0);
+        for (int col = 0; col < matrix.outerSize(); col++)
+        {
+            for (Eigen::SparseMatrix<double>::InnerIterator it(matrix, col); it; ++it)
+            {
+                if (it.row() == it.col())
+                    diagonal[it.row()] = it.value();
+            }
+        }
+
+        double maxAbsDiag = 0.0;
+        double minDiag = diagonal.empty() ? 0.0 : diagonal[0];
+        double minAbsDiag = diagonal.empty() ? 0.0 : fabs(diagonal[0]);
+        int nonPositiveDiag = 0;
+        for (unsigned int i = 0; i < diagonal.size(); i++)
+        {
+            maxAbsDiag = max(maxAbsDiag, fabs(diagonal[i]));
+            minDiag = min(minDiag, diagonal[i]);
+            minAbsDiag = min(minAbsDiag, fabs(diagonal[i]));
+            if (diagonal[i] <= 0.0)
+                nonPositiveDiag++;
+        }
+
+        const double tinyLimit = max(1.0, maxAbsDiag) * 1.0e-12;
+        int tinyDiag = 0;
+        for (unsigned int i = 0; i < diagonal.size(); i++)
+            if (fabs(diagonal[i]) <= tinyLimit)
+                tinyDiag++;
+
+        vector<unsigned int> sourceCounts(matrix.rows(), 0);
+        for (unsigned int eq = 0; eq < reducedIndex.size(); eq++)
+        {
+            int red = reducedIndex[eq];
+            if (red >= 0)
+                sourceCounts[red]++;
+        }
+
+        vector<pair<double, int> > suspicious;
+        suspicious.reserve(diagonal.size());
+        for (unsigned int i = 0; i < diagonal.size(); i++)
+            suspicious.push_back(make_pair(fabs(diagonal[i]), static_cast<int>(i)));
+        sort(suspicious.begin(), suspicious.end());
+
+        cerr << scientific << setprecision(6);
+        cerr << "    Reduced matrix dimension = " << matrix.rows()
+             << ", nonzeros = " << matrix.nonZeros() << endl;
+        cerr << "    Reduced diagonal min = " << minDiag
+             << ", min(abs) = " << minAbsDiag
+             << ", max(abs) = " << maxAbsDiag << endl;
+        cerr << "    Non-positive diagonal count = " << nonPositiveDiag
+             << ", tiny diagonal count(|d| <= " << tinyLimit << ") = " << tinyDiag << endl;
+        cerr << "    Smallest reduced diagonal entries:" << endl;
+        for (unsigned int i = 0; i < suspicious.size() && i < 12; i++)
+        {
+            int red = suspicious[i].second;
+            cerr << "      reduced eq " << red + 1
+                 << ": diag = " << diagonal[red]
+                 << ", source active dofs = " << sourceCounts[red] << endl;
+        }
+    }
 }
 #endif
 
@@ -63,14 +256,30 @@ void CLDLTSolver::LDLT()
 {
 #ifdef STAPPP_USE_EIGEN
     SparseK_ = BuildEigenSparseMatrix(K);
-    Solver_.analyzePattern(SparseK_);
-    Solver_.factorize(SparseK_);
-    if (Solver_.info() != Eigen::Success)
+    Transform_ = BuildConstraintTransform(K.dim(), MpcConstraints_, ReducedIndex_);
+    Eigen::SparseMatrix<double> reducedK = Transform_.transpose() * SparseK_ * Transform_;
+    reducedK.makeCompressed();
+
+    Solver_.analyzePattern(reducedK);
+    Solver_.factorize(reducedK);
+    if (Solver_.info() == Eigen::Success)
     {
-        cerr << "*** Error *** Eigen SimplicialLDLT factorization failed." << endl;
+        UseSparseLU_ = false;
+        Factorized_ = true;
+        return;
+    }
+
+    cerr << "*** Warning *** Eigen SimplicialLDLT factorization failed; falling back to SparseLU." << endl;
+    PrintReducedMatrixDiagnostics(reducedK, ReducedIndex_);
+    SparseLUSolver_.analyzePattern(reducedK);
+    SparseLUSolver_.factorize(reducedK);
+    if (SparseLUSolver_.info() != Eigen::Success)
+    {
+        cerr << "*** Error *** Eigen SparseLU factorization failed." << endl;
         exit(4);
     }
 
+    UseSparseLU_ = true;
     Factorized_ = true;
     return;
 #else
@@ -125,15 +334,28 @@ void CLDLTSolver::BackSubstitution(double* Force)
     for (unsigned int i = 0; i < N; i++)
         rhs[i] = Force[i];
 
-    Eigen::VectorXd solution = Solver_.solve(rhs);
-    if (Solver_.info() != Eigen::Success)
+    Eigen::VectorXd reducedRhs = Transform_.transpose() * rhs;
+    Eigen::VectorXd solution;
+    Eigen::ComputationInfo info;
+    if (UseSparseLU_)
     {
-        cerr << "*** Error *** Eigen SimplicialLDLT solve failed." << endl;
+        solution = SparseLUSolver_.solve(reducedRhs);
+        info = SparseLUSolver_.info();
+    }
+    else
+    {
+        solution = Solver_.solve(reducedRhs);
+        info = Solver_.info();
+    }
+    if (info != Eigen::Success)
+    {
+        cerr << "*** Error *** Eigen sparse solve failed." << endl;
         exit(4);
     }
 
+    Eigen::VectorXd fullSolution = Transform_ * solution;
     for (unsigned int i = 0; i < N; i++)
-        Force[i] = solution[i];
+        Force[i] = fullSolution[i];
     return;
 #else
 	unsigned int N = K.dim();

@@ -289,10 +289,11 @@ void CBbarHex8::ElementStiffness(double* Matrix)
         }
     }
 
-    // Pack upper triangle (column-major, increasing row)
+    // Pack upper triangle in the order expected by CSkylineMatrix::Assembly:
+    // diagonal first for each column, then the entries above it.
     int idx = 0;
     for (int col = 0; col < 24; col++)
-        for (int row = 0; row <= col; row++)
+        for (int row = col; row >= 0; row--)
             Matrix[idx++] = K[row][col];
 }
 

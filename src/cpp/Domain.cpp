@@ -326,13 +326,6 @@ void CDomain::CalculateColumnHeights()
         }
     }
 
-	for (unsigned int mpc = 0; mpc < MpcConstraints_.size(); mpc++)
-	{
-		CMpcConstraint& constraint = MpcConstraints_[mpc];
-		if (!constraint.equations.empty())
-			StiffnessMatrix->CalculateColumnHeight(&constraint.equations[0], constraint.equations.size());
-	}
-    
     StiffnessMatrix->CalculateMaximumHalfBandwidth();
     
 #ifdef _DEBUG_
@@ -388,8 +381,6 @@ void CDomain::AssembleStiffnessMatrix()
 		delete[] Matrix;
 		Matrix = nullptr;
 	}
-
-	ApplyMultiPointConstraintPenalty();
 
 #ifdef _DEBUG_
 	COutputter* Output = COutputter::GetInstance();

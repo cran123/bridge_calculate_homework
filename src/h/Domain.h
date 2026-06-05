@@ -16,23 +16,11 @@
 #include "Solver.h"
 #include "LoadCaseData.h"
 #include "SkylineMatrix.h"
+#include "MpcConstraint.h"
 
 #include <vector>
 
 using namespace std;
-
-struct CMpcTerm
-{
-	unsigned int node;
-	unsigned int dof;
-	double coefficient;
-};
-
-struct CMpcConstraint
-{
-	vector<CMpcTerm> terms;
-	vector<unsigned int> equations;
-};
 
 //!	Clear an array
 template <class type> void clear( type* a, unsigned int N );
@@ -194,5 +182,8 @@ public:
 
 //!	Return pointer to the banded stiffness matrix
 	inline CSkylineMatrix<double>* GetStiffnessMatrix() { return StiffnessMatrix; }
+
+//!	Return multi-point constraints
+	inline const vector<CMpcConstraint>& GetMpcConstraints() const { return MpcConstraints_; }
 
 };

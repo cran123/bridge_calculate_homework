@@ -278,7 +278,7 @@ void CHex8::ElementStiffness(double* Matrix)
 
     int idx = 0;
     for (int col = 0; col < 24; col++)
-        for (int row = 0; row <= col; row++)
+        for (int row = col; row >= 0; row--)
             Matrix[idx++] = K[row][col];
 }
 

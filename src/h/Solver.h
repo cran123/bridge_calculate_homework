@@ -11,10 +11,14 @@
 #pragma once
 
 #include "SkylineMatrix.h"
+#include "MpcConstraint.h"
 
 #ifdef STAPPP_USE_EIGEN
 #include <Eigen/Sparse>
+#include <Eigen/SparseLU>
 #endif
+
+#include <vector>
 
 //!	LDLT solver: A in core solver using skyline storage  and column reduction scheme
 class CLDLTSolver
@@ -22,17 +26,22 @@ class CLDLTSolver
 private:
     
     CSkylineMatrix<double>& K;
+    const std::vector<CMpcConstraint>& MpcConstraints_;
 
 #ifdef STAPPP_USE_EIGEN
     Eigen::SparseMatrix<double> SparseK_;
+    Eigen::SparseMatrix<double> Transform_;
     Eigen::SimplicialLDLT<Eigen::SparseMatrix<double> > Solver_;
+    Eigen::SparseLU<Eigen::SparseMatrix<double>, Eigen::COLAMDOrdering<int> > SparseLUSolver_;
+    std::vector<int> ReducedIndex_;
     bool Factorized_;
+    bool UseSparseLU_;
 #endif
 
 public:
 
 //!	Constructor
-	CLDLTSolver(CSkylineMatrix<double>* K);
+	CLDLTSolver(CSkylineMatrix<double>* K, const std::vector<CMpcConstraint>& MpcConstraints);
 
 //!	Perform L*D*L(T) factorization of the stiffness matrix
 	void LDLT();

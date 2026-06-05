@@ -86,7 +86,7 @@ int main(int argc, char *argv[])
     double time_assemble = timer.ElapsedTime();
 
 //  Solve the linear equilibrium equations for displacements
-	CLDLTSolver* Solver = new CLDLTSolver(FEMData->GetStiffnessMatrix());
+	CLDLTSolver* Solver = new CLDLTSolver(FEMData->GetStiffnessMatrix(), FEMData->GetMpcConstraints());
     
 //  Perform L*D*L(T) factorization of stiffness matrix
     Solver->LDLT();
