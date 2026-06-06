@@ -76,3 +76,18 @@ public:
 //!	Return shear modulus
 	double G() const { return E / (2.0 * (1.0 + nu)); }
 };
+
+//! Material class for Hex8 element
+class CHex8Material : public CMaterial
+{
+public:
+	double Nu;		//!< Poisson's ratio
+	double Density;	//!< Material density for self-weight
+
+public:
+//!	Read material data from stream Input
+	virtual bool Read(ifstream& Input);
+
+//!	Write material data to Stream
+	virtual void Write(COutputter& output);
+};

@@ -15,6 +15,9 @@
 #include "Element.h"
 #include "Bar.h"
 #include "Beam3D2.h"
+#include "Hex8.h"
+#include "BbarHex8.h"
+#include "Plate4.h"
 #include "Material.h"
 #include "Node.h"
 
@@ -30,7 +33,8 @@ enum ElementTypes
     H8,     // 8H element
     Beam,   // Beam element
     Plate,  // Plate element
-    Shell   // Shell elment
+    Shell,  // Shell elment
+    BbarH8  // 8H B-bar element
 };
 
 //! Element group class
@@ -70,6 +74,9 @@ public:
 
     //! Read element group data from stream Input
     bool Read(ifstream& Input);
+
+    //! Read element group data after the header has already been consumed
+    bool Read(ifstream& Input, ElementTypes ElementType, unsigned int NUME, unsigned int NUMMAT);
 
     //! Calculate the size of the derived element class and material class
     void CalculateMemberSize();

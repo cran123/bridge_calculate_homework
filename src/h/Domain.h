@@ -16,6 +16,13 @@
 #include "Solver.h"
 #include "LoadCaseData.h"
 #include "SkylineMatrix.h"
+#include "MpcConstraint.h"
+
+#ifdef STAPPP_USE_EIGEN
+#include <Eigen/Sparse>
+#endif
+
+#include <vector>
 
 using namespace std;
 
@@ -75,6 +82,21 @@ private:
 //!	Global nodal force/displacement vector
 	double* Force;
 
+//!	Penalty factor for displacement boundary conditions
+	double DisplacementPenalty_;
+
+//!	Penalty factor for multi-point constraints
+	double MpcPenalty_;
+
+//!	Multi-point constraints
+	vector<CMpcConstraint> MpcConstraints_;
+
+//!	Element group header already read when parsing legacy input
+	bool HasBufferedElementHeader_;
+	ElementTypes BufferedElementType_;
+	unsigned int BufferedNUME_;
+	unsigned int BufferedNUMMAT_;
+
 private:
 
 //!	Constructor
@@ -97,6 +119,9 @@ public:
 //!	Read load case data
 	bool ReadLoadCases();
 
+//!	Read optional multi-point constraints
+	bool ReadMultiPointConstraints();
+
 //!	Read element data
 	bool ReadElements();
 
@@ -111,11 +136,28 @@ public:
     calculate the column heights and address of diagonal elements */
 	void AllocateMatrices();
 
+#ifdef STAPPP_USE_EIGEN
+//! Allocate only global force/displacement vector for direct sparse assembly
+	void AllocateForceVector();
+
+//! Assemble directly into an Eigen sparse matrix, bypassing skyline storage
+	void AssembleSparseStiffnessMatrix(Eigen::SparseMatrix<double>& SparseMatrix);
+
+//! Apply penalty terms for displacement boundary conditions to a sparse matrix
+	void ApplyDisplacementPenalty(Eigen::SparseMatrix<double>& SparseMatrix);
+#endif
+
 //!	Assemble the banded gloabl stiffness matrix
 	void AssembleStiffnessMatrix();
 
 //!	Assemble the global nodal force vector for load case LoadCase
 	bool AssembleForce(unsigned int LoadCase); 
+
+//!	Apply penalty terms for displacement boundary conditions
+	void ApplyDisplacementPenalty();
+
+//!	Apply penalty terms for multi-point constraints
+	void ApplyMultiPointConstraintPenalty();
 
 //!	Return solution mode
 	inline unsigned int GetMODEX() { return MODEX; }
@@ -155,5 +197,8 @@ public:
 
 //!	Return pointer to the banded stiffness matrix
 	inline CSkylineMatrix<double>* GetStiffnessMatrix() { return StiffnessMatrix; }
+
+//!	Return multi-point constraints
+	inline const vector<CMpcConstraint>& GetMpcConstraints() const { return MpcConstraints_; }
 
 };

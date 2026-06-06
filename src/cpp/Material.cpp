@@ -90,3 +90,36 @@ void CBeamMaterial::Write(COutputter& output)
 		   << setw(16) << Iy << setw(16) << Iz << setw(16) << J
 		   << setw(16) << rho << endl;
 }
+
+//	Read Hex8 material data from stream Input
+bool CHex8Material::Read(ifstream& Input)
+{
+	Input >> nset;
+
+	string line;
+	getline(Input, line);
+	istringstream stream(line);
+
+	vector<double> values;
+	double value;
+	while (stream >> value)
+		values.push_back(value);
+
+	if (values.size() < 2)
+	{
+		cerr << "*** Error *** Invalid Hex8 material set " << nset << endl;
+		return false;
+	}
+
+	E = values[0];
+	Nu = values[1];
+	Density = values.size() > 2 ? values[2] : 0.0;
+
+	return true;
+}
+
+//	Write Hex8 material data to Stream
+void CHex8Material::Write(COutputter& output)
+{
+	output << setw(16) << E << setw(16) << Nu << setw(16) << Density << endl;
+}

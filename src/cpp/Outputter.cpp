@@ -8,11 +8,14 @@
 /*     http://www.comdyn.cn/                                                 */
 /*****************************************************************************/
 
+#include <cmath>
 #include <ctime>
 
 #include "Beam3D2.h"
 #include "Domain.h"
+#include "Hex8.h"
 #include "Outputter.h"
+#include "Plate4.h"
 #include "SkylineMatrix.h"
 
 using namespace std;
@@ -149,7 +152,10 @@ void COutputter::OutputElementInfo()
 		*this << " ELEMENT TYPE  . . . . . . . . . . . . .( NPAR(1) ) . . =" << setw(5)
 			  << ElementType << endl;
 		*this << "     EQ.1, TRUSS ELEMENTS" << endl
+			  << "     EQ.4, H8 EIGHT-NODE SOLID ELEMENTS" << endl
 			  << "     EQ.5, B31 TWO-NODE 3D BEAM ELEMENTS" << endl
+			  << "     EQ.6, S4R FOUR-NODE PLATE/SHELL ELEMENTS" << endl
+			  << "     EQ.8, B-BAR H8 SOLID ELEMENTS" << endl
 			  << "     OTHER TYPES, NOT AVAILABLE" << endl
 			  << endl;
 
@@ -164,6 +170,13 @@ void COutputter::OutputElementInfo()
 				break;
 			case ElementTypes::Beam:
 				OutputBeamElements(EleGrp);
+				break;
+			case ElementTypes::H8:
+			case ElementTypes::BbarH8:
+				OutputHex8Elements(EleGrp);
+				break;
+			case ElementTypes::Plate:
+				OutputPlateElements(EleGrp);
 				break;
 		    default:
 		        *this << ElementType << " has not been implemented yet." << endl;
@@ -250,6 +263,93 @@ void COutputter::OutputBeamElements(unsigned int EleGrp)
 	*this << " ELEMENT     NODE     NODE       MATERIAL"
 		  << "       REF-VX          REF-VY          REF-VZ" << endl
 		  << " NUMBER-N      I        J       SET NUMBER" << endl;
+
+	unsigned int NUME = ElementGroup.GetNUME();
+
+	for (unsigned int Ele = 0; Ele < NUME; Ele++)
+	{
+		*this << setw(5) << Ele + 1;
+		ElementGroup[Ele].Write(*this);
+	}
+
+	*this << endl;
+}
+
+//	Output hex8 element data
+void COutputter::OutputHex8Elements(unsigned int EleGrp)
+{
+	CDomain* FEMData = CDomain::GetInstance();
+
+	CElementGroup& ElementGroup = FEMData->GetEleGrpList()[EleGrp];
+	unsigned int NUMMAT = ElementGroup.GetNUMMAT();
+
+	*this << " M A T E R I A L   D E F I N I T I O N" << endl
+		  << endl;
+	*this << " NUMBER OF DIFFERENT SETS OF SOLID MATERIAL"
+		  << " . . . . . . . . . . . . . . . . . . . .( NPAR(3) ) . . =" << setw(5) << NUMMAT
+		  << endl
+		  << endl;
+
+	*this << "  SET       YOUNG'S        POISSON        DENSITY" << endl
+		  << " NUMBER     MODULUS         RATIO" << endl
+		  << "               E             NU             RHO" << endl;
+
+	*this << setiosflags(ios::scientific) << setprecision(5);
+
+	for (unsigned int mset = 0; mset < NUMMAT; mset++)
+	{
+		*this << setw(5) << mset + 1;
+		ElementGroup.GetMaterial(mset).Write(*this);
+	}
+
+	*this << endl << endl
+		  << " E L E M E N T   I N F O R M A T I O N" << endl;
+
+	*this << " ELEMENT     NODE     NODE     NODE     NODE     NODE     NODE     NODE     NODE       MATERIAL" << endl
+		  << " NUMBER-N      1        2        3        4        5        6        7        8       SET NUMBER" << endl;
+
+	unsigned int NUME = ElementGroup.GetNUME();
+
+	for (unsigned int Ele = 0; Ele < NUME; Ele++)
+	{
+		*this << setw(5) << Ele + 1;
+		ElementGroup[Ele].Write(*this);
+	}
+
+	*this << endl;
+}
+
+//	Output plate element data
+void COutputter::OutputPlateElements(unsigned int EleGrp)
+{
+	CDomain* FEMData = CDomain::GetInstance();
+
+	CElementGroup& ElementGroup = FEMData->GetEleGrpList()[EleGrp];
+	unsigned int NUMMAT = ElementGroup.GetNUMMAT();
+
+	*this << " M A T E R I A L   A N D   T H I C K N E S S   D E F I N I T I O N" << endl
+		  << endl;
+	*this << " NUMBER OF DIFFERENT SETS OF PLATE MATERIAL"
+		  << " . . . . . . . . . . . . . . . . . . . .( NPAR(3) ) . . =" << setw(5) << NUMMAT
+		  << endl
+		  << endl;
+
+	*this << "  SET       YOUNG'S        POISSON       THICKNESS       DENSITY" << endl
+		  << " NUMBER     MODULUS         RATIO" << endl;
+
+	*this << setiosflags(ios::scientific) << setprecision(5);
+
+	for (unsigned int mset = 0; mset < NUMMAT; mset++)
+	{
+		*this << setw(5) << mset + 1;
+		ElementGroup.GetMaterial(mset).Write(*this);
+	}
+
+	*this << endl << endl
+		  << " E L E M E N T   I N F O R M A T I O N" << endl;
+
+	*this << " ELEMENT     NODE     NODE     NODE     NODE       MATERIAL" << endl
+		  << " NUMBER-N      1        2        3        4       SET NUMBER" << endl;
 
 	unsigned int NUME = ElementGroup.GetNUME();
 
@@ -368,6 +468,67 @@ void COutputter::OutputElementStress()
 						  << setw(18) << stress[3]
 						  << setw(18) << stress[1]
 						  << setw(18) << stress[2] << endl;
+				}
+
+				*this << endl;
+				break;
+			}
+
+			case ElementTypes::H8:
+			case ElementTypes::BbarH8:
+			{
+				*this << "  ELEMENT        SXX          SYY          SZZ          SXY          SYZ          SXZ        VON MISES" << endl
+					  << "  NUMBER" << endl;
+
+				double stress[6];
+
+				for (unsigned int Ele = 0; Ele < NUME; Ele++)
+				{
+					CElement& Element = EleGrp[Ele];
+					Element.ElementStress(stress, Displacement);
+
+					double sxx = stress[0];
+					double syy = stress[1];
+					double szz = stress[2];
+					double sxy = stress[3];
+					double syz = stress[4];
+					double sxz = stress[5];
+					double vm = sqrt(0.5 * ((sxx - syy) * (sxx - syy) + (syy - szz) * (syy - szz) + (szz - sxx) * (szz - sxx))
+						+ 3.0 * (sxy * sxy + syz * syz + sxz * sxz));
+
+					*this << setw(5) << Ele + 1
+						  << setw(12) << sxx
+						  << setw(12) << syy
+						  << setw(12) << szz
+						  << setw(12) << sxy
+						  << setw(12) << syz
+						  << setw(12) << sxz
+						  << setw(12) << vm << endl;
+				}
+
+				*this << endl;
+				break;
+			}
+
+			case ElementTypes::Plate:
+			{
+				*this << "  ELEMENT         SX           SY          SXY           MX           MY          MXY" << endl
+					  << "  NUMBER" << endl;
+
+				double stress[7];
+
+				for (unsigned int Ele = 0; Ele < NUME; Ele++)
+				{
+					CElement& Element = EleGrp[Ele];
+					Element.ElementStress(stress, Displacement);
+
+					*this << setw(5) << Ele + 1
+						  << setw(13) << stress[0]
+						  << setw(13) << stress[1]
+						  << setw(13) << stress[2]
+						  << setw(13) << stress[3]
+						  << setw(13) << stress[4]
+						  << setw(13) << stress[5] << endl;
 				}
 
 				*this << endl;

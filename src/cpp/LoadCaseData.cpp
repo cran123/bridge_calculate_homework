@@ -32,6 +32,14 @@ void CLoadCaseData :: Allocate(unsigned int num)
 	load = new double[nloads];
 }; 
 
+void CLoadCaseData :: AllocateDisp(unsigned int num)
+{
+	ndisp = num;
+	dispNode = new unsigned int[ndisp];
+	dispDof = new unsigned int[ndisp];
+	dispValue = new double[ndisp];
+};
+
 //	Read load case data from stream Input
 bool CLoadCaseData :: Read(ifstream& Input)
 {
@@ -54,17 +62,29 @@ bool CLoadCaseData :: Read(ifstream& Input)
 		gravity[0] = gx;
 		gravity[1] = gy;
 		gravity[2] = gz;
+
+		unsigned int nd = 0;
+		if (lineStream >> nd)
+			ndisp = nd;
 	}
 	else
 	{
 		hasGravity = false;
 		gravity[0] = gravity[1] = gravity[2] = 0.0;
+		ndisp = 0;
 	}
 
 	Allocate(NL);
 
 	for (unsigned int i = 0; i < NL; i++)
 		Input >> node[i] >> dof[i] >> load[i];
+
+	if (ndisp > 0)
+	{
+		AllocateDisp(ndisp);
+		for (unsigned int i = 0; i < ndisp; i++)
+			Input >> dispNode[i] >> dispDof[i] >> dispValue[i];
+	}
 
 	return true;
 }

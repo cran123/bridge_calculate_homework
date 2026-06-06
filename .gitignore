@@ -1,6 +1,12 @@
 build/
+build-*/
 .cache/
 .vscode/
+__pycache__/
+*.pyc
+abaqus.rpy*
+*.rec
+results/
 *.out
 *.vtu
 *.exe
@@ -8,3 +14,9 @@ build/
 *.pdb
 *.ilk
 *.user
+data/
+tests/
+build_eigen_check/
+build_eigen_run/
+cases/
+third_party/
