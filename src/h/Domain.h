@@ -18,6 +18,10 @@
 #include "SkylineMatrix.h"
 #include "MpcConstraint.h"
 
+#ifdef STAPPP_USE_EIGEN
+#include <Eigen/Sparse>
+#endif
+
 #include <vector>
 
 using namespace std;
@@ -131,6 +135,17 @@ public:
 /*!	Allocate Force, ColumnHeights, DiagonalAddress and StiffnessMatrix and 
     calculate the column heights and address of diagonal elements */
 	void AllocateMatrices();
+
+#ifdef STAPPP_USE_EIGEN
+//! Allocate only global force/displacement vector for direct sparse assembly
+	void AllocateForceVector();
+
+//! Assemble directly into an Eigen sparse matrix, bypassing skyline storage
+	void AssembleSparseStiffnessMatrix(Eigen::SparseMatrix<double>& SparseMatrix);
+
+//! Apply penalty terms for displacement boundary conditions to a sparse matrix
+	void ApplyDisplacementPenalty(Eigen::SparseMatrix<double>& SparseMatrix);
+#endif
 
 //!	Assemble the banded gloabl stiffness matrix
 	void AssembleStiffnessMatrix();

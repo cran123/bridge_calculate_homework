@@ -18,20 +18,36 @@
 #include <map>
 #include <set>
 #include <vector>
+#include <cstdlib>
+#include <string>
 
 using namespace std;
 
 CLDLTSolver::CLDLTSolver(CSkylineMatrix<double>* K, const vector<CMpcConstraint>& MpcConstraints)
-    : K(*K)
+    : K_(K)
     , MpcConstraints_(MpcConstraints)
 #ifdef STAPPP_USE_EIGEN
+    , SparseInput_(nullptr)
     , Factorized_(false)
+    , UseLLT_(false)
     , UseSparseLU_(false)
+    , UseCG_(false)
 #endif
 {
 }
 
 #ifdef STAPPP_USE_EIGEN
+CLDLTSolver::CLDLTSolver(const Eigen::SparseMatrix<double>* K, const vector<CMpcConstraint>& MpcConstraints)
+    : K_(nullptr)
+    , MpcConstraints_(MpcConstraints)
+    , SparseInput_(K)
+    , Factorized_(false)
+    , UseLLT_(false)
+    , UseSparseLU_(false)
+    , UseCG_(false)
+{
+}
+
 namespace
 {
     Eigen::SparseMatrix<double> BuildEigenSparseMatrix(CSkylineMatrix<double>& K)
@@ -248,6 +264,30 @@ namespace
                  << ", source active dofs = " << sourceCounts[red] << endl;
         }
     }
+
+    bool IsEnabledEnv(const char* value, const char* name)
+    {
+        if (!value)
+            return false;
+        string v(value);
+        return v == name;
+    }
+
+    int EnvInt(const char* name, int fallback)
+    {
+        const char* value = getenv(name);
+        if (!value)
+            return fallback;
+        return atoi(value);
+    }
+
+    double EnvDouble(const char* name, double fallback)
+    {
+        const char* value = getenv(name);
+        if (!value)
+            return fallback;
+        return atof(value);
+    }
 }
 #endif
 
@@ -255,13 +295,59 @@ namespace
 void CLDLTSolver::LDLT()
 {
 #ifdef STAPPP_USE_EIGEN
-    SparseK_ = BuildEigenSparseMatrix(K);
-    Transform_ = BuildConstraintTransform(K.dim(), MpcConstraints_, ReducedIndex_);
-    Eigen::SparseMatrix<double> reducedK = Transform_.transpose() * SparseK_ * Transform_;
-    reducedK.makeCompressed();
+    if (SparseInput_)
+        SparseK_ = *SparseInput_;
+    else
+        SparseK_ = BuildEigenSparseMatrix(*K_);
 
-    Solver_.analyzePattern(reducedK);
-    Solver_.factorize(reducedK);
+    const unsigned int dimension = static_cast<unsigned int>(SparseK_.rows());
+    Transform_ = BuildConstraintTransform(dimension, MpcConstraints_, ReducedIndex_);
+    ReducedK_ = Transform_.transpose() * SparseK_ * Transform_;
+    ReducedK_.makeCompressed();
+
+    const char* solverMode = getenv("STAPPP_SOLVER");
+    if (IsEnabledEnv(solverMode, "pcg_ic"))
+    {
+        UseCG_ = true;
+        UseLLT_ = false;
+        UseSparseLU_ = false;
+        CgSolver_.setTolerance(EnvDouble("STAPPP_CG_TOL", 1.0e-8));
+        CgSolver_.setMaxIterations(EnvInt("STAPPP_CG_MAXITER", 5000));
+        CgSolver_.compute(ReducedK_);
+        if (CgSolver_.info() != Eigen::Success)
+        {
+            cerr << "*** Error *** Eigen PCG/IncompleteCholesky setup failed." << endl;
+            PrintReducedMatrixDiagnostics(ReducedK_, ReducedIndex_);
+            exit(4);
+        }
+        cerr << "    Eigen PCG/IncompleteCholesky solver prepared."
+             << " max_iterations=" << CgSolver_.maxIterations()
+             << " tolerance=" << CgSolver_.tolerance() << endl;
+        Factorized_ = true;
+        return;
+    }
+
+    UseCG_ = false;
+    if (IsEnabledEnv(solverMode, "direct_llt") || IsEnabledEnv(solverMode, "llt"))
+    {
+        LLTSolver_.analyzePattern(ReducedK_);
+        LLTSolver_.factorize(ReducedK_);
+        if (LLTSolver_.info() == Eigen::Success)
+        {
+            cerr << "    Eigen SimplicialLLT direct solver prepared." << endl;
+            UseLLT_ = true;
+            UseSparseLU_ = false;
+            Factorized_ = true;
+            return;
+        }
+
+        cerr << "*** Warning *** Eigen SimplicialLLT factorization failed; falling back to SimplicialLDLT." << endl;
+    }
+
+    UseCG_ = false;
+    UseLLT_ = false;
+    Solver_.analyzePattern(ReducedK_);
+    Solver_.factorize(ReducedK_);
     if (Solver_.info() == Eigen::Success)
     {
         UseSparseLU_ = false;
@@ -270,9 +356,9 @@ void CLDLTSolver::LDLT()
     }
 
     cerr << "*** Warning *** Eigen SimplicialLDLT factorization failed; falling back to SparseLU." << endl;
-    PrintReducedMatrixDiagnostics(reducedK, ReducedIndex_);
-    SparseLUSolver_.analyzePattern(reducedK);
-    SparseLUSolver_.factorize(reducedK);
+    PrintReducedMatrixDiagnostics(ReducedK_, ReducedIndex_);
+    SparseLUSolver_.analyzePattern(ReducedK_);
+    SparseLUSolver_.factorize(ReducedK_);
     if (SparseLUSolver_.info() != Eigen::Success)
     {
         cerr << "*** Error *** Eigen SparseLU factorization failed." << endl;
@@ -283,8 +369,8 @@ void CLDLTSolver::LDLT()
     Factorized_ = true;
     return;
 #else
-	unsigned int N = K.dim();
-    unsigned int* ColumnHeights = K.GetColumnHeights();   // Column Hights
+	unsigned int N = K_->dim();
+    unsigned int* ColumnHeights = K_->GetColumnHeights();   // Column Hights
 
 	for (unsigned int j = 2; j <= N; j++)      // Loop for column 2:n (Numbering starting from 1)
 	{
@@ -298,23 +384,23 @@ void CLDLTSolver::LDLT()
 
 			double C = 0.0;
 			for (unsigned int r = max(mi, mj); r <= i-1; r++)
-				C += K(r,i) * K(r,j);		// C += L_ri * U_rj
+				C += (*K_)(r,i) * (*K_)(r,j);		// C += L_ri * U_rj
 
-			K(i,j) -= C;	// U_ij = K_ij - C
+			(*K_)(i,j) -= C;	// U_ij = K_ij - C
 		}
 
 		for (unsigned int r = mj; r <= j-1; r++)	// Loop for mj:j-1 (column j)
 		{
-			double Lrj = K(r,j) / K(r,r);	// L_rj = U_rj / D_rr
-			K(j,j) -= Lrj * K(r,j);	// D_jj = K_jj - sum(L_rj*U_rj, r=mj:j-1)
-			K(r,j) = Lrj;
+			double Lrj = (*K_)(r,j) / (*K_)(r,r);	// L_rj = U_rj / D_rr
+			(*K_)(j,j) -= Lrj * (*K_)(r,j);	// D_jj = K_jj - sum(L_rj*U_rj, r=mj:j-1)
+			(*K_)(r,j) = Lrj;
 		}
 
-        if (fabs(K(j,j)) <= FLT_MIN)
+        if (fabs((*K_)(j,j)) <= FLT_MIN)
         {
             cerr << "*** Error *** Stiffness matrix is not positive definite !" << endl
             	 << "    Euqation no = " << j << endl
-            	 << "    Pivot = " << K(j,j) << endl;
+            	 << "    Pivot = " << (*K_)(j,j) << endl;
             
             exit(4);
         }
@@ -329,7 +415,7 @@ void CLDLTSolver::BackSubstitution(double* Force)
     if (!Factorized_)
         LDLT();
 
-    const unsigned int N = K.dim();
+    const unsigned int N = static_cast<unsigned int>(SparseK_.rows());
     Eigen::VectorXd rhs(N);
     for (unsigned int i = 0; i < N; i++)
         rhs[i] = Force[i];
@@ -337,7 +423,19 @@ void CLDLTSolver::BackSubstitution(double* Force)
     Eigen::VectorXd reducedRhs = Transform_.transpose() * rhs;
     Eigen::VectorXd solution;
     Eigen::ComputationInfo info;
-    if (UseSparseLU_)
+    if (UseCG_)
+    {
+        solution = CgSolver_.solve(reducedRhs);
+        info = CgSolver_.info();
+        cerr << "    Eigen PCG iterations = " << CgSolver_.iterations()
+             << ", estimated error = " << CgSolver_.error() << endl;
+    }
+    else if (UseLLT_)
+    {
+        solution = LLTSolver_.solve(reducedRhs);
+        info = LLTSolver_.info();
+    }
+    else if (UseSparseLU_)
     {
         solution = SparseLUSolver_.solve(reducedRhs);
         info = SparseLUSolver_.info();
@@ -353,13 +451,21 @@ void CLDLTSolver::BackSubstitution(double* Force)
         exit(4);
     }
 
+    if (getenv("STAPPP_CHECK_RESIDUAL"))
+    {
+        Eigen::VectorXd residual = ReducedK_ * solution - reducedRhs;
+        double relative = residual.norm() / max(1.0, reducedRhs.norm());
+        cerr << "    Reduced equation relative residual = " << scientific << setprecision(6)
+             << relative << defaultfloat << endl;
+    }
+
     Eigen::VectorXd fullSolution = Transform_ * solution;
     for (unsigned int i = 0; i < N; i++)
         Force[i] = fullSolution[i];
     return;
 #else
-	unsigned int N = K.dim();
-    unsigned int* ColumnHeights = K.GetColumnHeights();   // Column Hights
+	unsigned int N = K_->dim();
+    unsigned int* ColumnHeights = K_->GetColumnHeights();   // Column Hights
 
 //	Reduce right-hand-side load vector (LV = R)
 	for (unsigned int i = 2; i <= N; i++)	// Loop for i=2:N (Numering starting from 1)
@@ -367,19 +473,19 @@ void CLDLTSolver::BackSubstitution(double* Force)
         unsigned int mi = i - ColumnHeights[i-1];
 
 		for (unsigned int j = mi; j <= i-1; j++)	// Loop for j=mi:i-1
-			Force[i-1] -= K(j,i) * Force[j-1];	// V_i = R_i - sum_j (L_ji V_j)
+			Force[i-1] -= (*K_)(j,i) * Force[j-1];	// V_i = R_i - sum_j (L_ji V_j)
 	}
 
 //	Back substitute (Vbar = D^(-1) V, L^T a = Vbar)
 	for (unsigned int i = 1; i <= N; i++)	// Loop for i=1:N
-		Force[i-1] /= K(i,i);	// Vbar = D^(-1) V
+		Force[i-1] /= (*K_)(i,i);	// Vbar = D^(-1) V
 
 	for (unsigned int j = N; j >= 2; j--)	// Loop for j=N:2
 	{
         unsigned int mj = j - ColumnHeights[j-1];
 
 		for (unsigned int i = mj; i <= j-1; i++)	// Loop for i=mj:j-1
-			Force[i-1] -= K(i,j) * Force[j-1];	// a_i = Vbar_i - sum_j(L_ij Vbar_j)
+			Force[i-1] -= (*K_)(i,j) * Force[j-1];	// a_i = Vbar_i - sum_j(L_ij Vbar_j)
 	}
 #endif
 };

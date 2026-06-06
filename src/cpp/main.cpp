@@ -14,6 +14,7 @@
 #include "Clock.h"
 #include "VTKOutputter.h"
 
+#include <cstdlib>
 #include <string>
 
 using namespace std;
@@ -60,33 +61,87 @@ int main(int argc, char *argv[])
 
     COutputter* Output = COutputter::GetInstance();
 
+#ifdef STAPPP_USE_EIGEN
+    const char* sparseEnv = std::getenv("STAPPP_SPARSE_ASSEMBLY");
+    bool useSparseAssembly = false;
+    if (sparseEnv)
+    {
+        string value(sparseEnv);
+        useSparseAssembly = value != "0" && value != "false" && value != "FALSE";
+    }
+#else
+    bool useSparseAssembly = false;
+#endif
+
     if (!FEMData->GetMODEX())
     {
         *Output << "Data check completed !" << endl << endl;
         return 0;
     }
 
+#ifdef STAPPP_USE_EIGEN
+    Eigen::SparseMatrix<double> SparseStiffnessMatrix;
+#endif
+    CLDLTSolver* Solver = nullptr;
+
 //  Allocate global vectors and matrices, such as the Force, ColumnHeights,
 //  DiagonalAddress and StiffnessMatrix, and calculate the column heights
 //  and address of diagonal elements
-	FEMData->AllocateMatrices();
-
-    if (FEMData->GetMODEX() == 2)
+    if (useSparseAssembly)
     {
-        *Output << "Matrix check completed !" << endl << endl;
-        return 0;
+#ifdef STAPPP_USE_EIGEN
+        FEMData->AllocateForceVector();
+        FEMData->AssembleSparseStiffnessMatrix(SparseStiffnessMatrix);
+        FEMData->ApplyDisplacementPenalty(SparseStiffnessMatrix);
+
+        *Output << "	TOTAL SPARSE SYSTEM DATA" << endl
+                << endl
+                << "     NUMBER OF EQUATIONS . . . . . . . . . . . . . .(NEQ) = "
+                << FEMData->GetNEQ() << endl
+                << "     NUMBER OF SPARSE NONZEROS . . . . . . . . . . .      = "
+                << SparseStiffnessMatrix.nonZeros() << endl
+                << "     ESTIMATED SPARSE STORAGE BYTES . . . . . . . . .     = "
+                << static_cast<unsigned long long>(SparseStiffnessMatrix.nonZeros()) *
+                       (sizeof(double) + sizeof(int))
+                   + static_cast<unsigned long long>(SparseStiffnessMatrix.outerSize() + 1) * sizeof(int)
+                << endl
+                << endl
+                << endl;
+
+        if (FEMData->GetMODEX() == 2)
+        {
+            *Output << "Sparse matrix check completed !" << endl << endl;
+            return 0;
+        }
+
+        Solver = new CLDLTSolver(&SparseStiffnessMatrix, FEMData->GetMpcConstraints());
+#else
+        cerr << "*** Error *** Direct sparse assembly requires Eigen solver build." << endl;
+        exit(4);
+#endif
     }
+    else
+    {
+	    FEMData->AllocateMatrices();
+
+        if (FEMData->GetMODEX() == 2)
+        {
+            *Output << "Matrix check completed !" << endl << endl;
+            return 0;
+        }
     
 //  Assemble the banded gloabl stiffness matrix
-	FEMData->AssembleStiffnessMatrix();
+	    FEMData->AssembleStiffnessMatrix();
 
 //  Apply penalty terms for prescribed displacements
-	FEMData->ApplyDisplacementPenalty();
+	    FEMData->ApplyDisplacementPenalty();
+
+        Solver = new CLDLTSolver(FEMData->GetStiffnessMatrix(), FEMData->GetMpcConstraints());
+    }
     
     double time_assemble = timer.ElapsedTime();
 
 //  Solve the linear equilibrium equations for displacements
-	CLDLTSolver* Solver = new CLDLTSolver(FEMData->GetStiffnessMatrix(), FEMData->GetMpcConstraints());
     
 //  Perform L*D*L(T) factorization of stiffness matrix
     Solver->LDLT();

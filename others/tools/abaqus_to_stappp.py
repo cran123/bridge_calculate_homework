@@ -77,6 +77,20 @@ def rotate_about(point, axis_p1, matrix):
     return (rot[0] + axis_p1[0], rot[1] + axis_p1[1], rot[2] + axis_p1[2])
 
 
+def clean_direction(vector):
+    cleaned = tuple(0.0 if abs(v) < 1.0e-12 else v for v in vector)
+    length = math.sqrt(sum(v * v for v in cleaned))
+    if length <= 1.0e-12:
+        return (0.0, 0.0, 1.0)
+    return tuple(v / length for v in cleaned)
+
+
+def transform_direction(matrix, vector):
+    if matrix is None:
+        return clean_direction(vector)
+    return clean_direction(matmul_vec(matrix, vector))
+
+
 def box_section_properties(values):
     if len(values) < 6:
         return (1.0, 1.0, 1.0, 1.0)
@@ -453,7 +467,12 @@ def flatten_model(parts, instances):
             for eid, conn, elset in elems:
                 flat_conn = [node_map[(inst["name"], nid)] for nid in conn]
                 resolved_elset = resolve_element_elset(part, etype, eid, elset)
-                flat_elements[etype].append((eid, flat_conn, inst["part"], resolved_elset))
+                metadata = {"instance": inst["name"]}
+                if etype == "B31":
+                    section = part["beam_sections"].get(resolved_elset, {})
+                    ref = section.get("ref", (0.0, 0.0, 1.0))
+                    metadata["beam_ref"] = transform_direction(inst["rot_matrix"], ref)
+                flat_elements[etype].append((eid, flat_conn, inst["part"], resolved_elset, metadata))
 
     return nodes, node_map, flat_elements
 
@@ -606,15 +625,15 @@ def surface_facets(master_nodes, flat_elements):
         (3, 0, 4, 7),
     )
     for etype in ("C3D8R", "C3D8"):
-        for _eid, conn, _part_name, _elset in flat_elements[etype]:
+        for _eid, conn, _part_name, _elset, *_metadata in flat_elements[etype]:
             for face in h8_faces:
                 face_conn = tuple(conn[i] for i in face)
                 if all(nid in master_set for nid in face_conn):
                     facets.append(("quad", face_conn))
-    for _eid, conn, _part_name, _elset in flat_elements["S4R"]:
+    for _eid, conn, _part_name, _elset, *_metadata in flat_elements["S4R"]:
         if all(nid in master_set for nid in conn):
             facets.append(("quad", tuple(conn)))
-    for _eid, conn, _part_name, _elset in flat_elements["B31"]:
+    for _eid, conn, _part_name, _elset, *_metadata in flat_elements["B31"]:
         if all(nid in master_set for nid in conn):
             facets.append(("line", tuple(conn)))
     return facets
@@ -645,7 +664,7 @@ def node_element_kinds(flat_elements):
             has_rotation = True
         else:
             has_rotation = False
-        for _eid, conn, _part_name, _elset in elems:
+        for _eid, conn, _part_name, _elset, *_metadata in elems:
             for nid in conn:
                 entry = kinds.setdefault(nid, {"rotation": False, "solid": False})
                 entry["rotation"] = entry["rotation"] or has_rotation
@@ -729,7 +748,7 @@ def build_tie_mpcs(nodes, node_map, flat_elements, assembly_nsets, assembly_surf
 def build_node_adjacency(nodes, flat_elements):
     adjacency = {nid: set() for nid in nodes}
     for elems in flat_elements.values():
-        for _eid, conn, _part_name, _elset in elems:
+        for _eid, conn, _part_name, _elset, *_metadata in elems:
             unique_conn = list(dict.fromkeys(conn))
             for i, nid in enumerate(unique_conn):
                 neighbors = adjacency[nid]
@@ -777,8 +796,10 @@ def renumber_nodes(nodes, node_map, flat_elements, method):
         node_map[key] = old_to_new[old_id]
 
     for etype, elems in flat_elements.items():
-        for idx, (eid, conn, part_name, elset) in enumerate(elems):
-            flat_elements[etype][idx] = (eid, [old_to_new[nid] for nid in conn], part_name, elset)
+        for idx, element in enumerate(elems):
+            eid, conn, part_name, elset, *metadata = element
+            flat_elements[etype][idx] = (eid, [old_to_new[nid] for nid in conn],
+                                         part_name, elset, metadata[0] if metadata else {})
 
     return new_nodes, node_map, flat_elements
 
@@ -801,7 +822,7 @@ def apply_boundaries(boundary_specs, assembly_nsets, node_map):
 def node_rotation_flags(nodes, flat_elements):
     flags = {nid: [1, 1, 1] for nid in nodes}
     for etype in ("S4R", "B31"):
-        for _eid, conn, _part_name, _elset in flat_elements[etype]:
+        for _eid, conn, _part_name, _elset, *_metadata in flat_elements[etype]:
             for nid in conn:
                 flags[nid] = [0, 0, 0]
     return flags
@@ -833,7 +854,7 @@ def material_key(kind, part, elset, materials):
 def build_material_map(elements, parts, materials, kind):
     mats = []
     mapping = {}
-    for _eid, _conn, part_name, elset in elements:
+    for _eid, _conn, part_name, elset, *_metadata in elements:
         key = material_key(kind, parts[part_name], elset, materials)
         if None in key:
             continue
@@ -848,11 +869,13 @@ def write_group(f, element_type, elements, mats, mat_map, parts, materials, kind
     for idx, mat in enumerate(mats, start=1):
         f.write(f"{idx} " + " ".join(str(v) for v in mat) + "\n")
 
-    for idx, (_eid, conn, part_name, elset) in enumerate(elements, start=1):
+    for idx, element in enumerate(elements, start=1):
+        _eid, conn, part_name, elset, *metadata = element
+        metadata = metadata[0] if metadata else {}
         key = material_key(kind, parts[part_name], elset, materials)
         mset = mat_map[key]
         if element_type == 5:
-            ref = parts[part_name]["beam_sections"].get(elset, {}).get("ref", (0.0, 0.0, 1.0))
+            ref = metadata.get("beam_ref", parts[part_name]["beam_sections"].get(elset, {}).get("ref", (0.0, 0.0, 1.0)))
             f.write(f"{idx} {conn[0]} {conn[1]} {mset} {ref[0]} {ref[1]} {ref[2]}\n")
         else:
             f.write(f"{idx} " + " ".join(str(n) for n in conn) + f" {mset}\n")
