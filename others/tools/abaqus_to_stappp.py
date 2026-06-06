@@ -2,7 +2,16 @@
 
 import argparse
 from collections import deque
+from dataclasses import dataclass
 import math
+
+
+@dataclass
+class TieConstraint:
+    slave_surface: str
+    master_surface: str
+    adjust: bool = True
+    no_rotation: bool = False
 
 
 def parse_options(line):
@@ -114,6 +123,7 @@ def parse_inp(path):
     instances = []
     assembly_nsets = {}
     assembly_surfaces = {}
+    assembly_surface_types = {}
     ties = []
     boundaries = []
     loads = []
@@ -356,6 +366,8 @@ def parse_inp(path):
                     parts_line = [p.strip() for p in data.split(",")]
                     if parts_line and parts_line[0]:
                         refs.append(parts_line[0])
+            if name:
+                assembly_surface_types[name] = surface_type
             if name and surface_type == "NODE":
                 assembly_surfaces[name] = refs
             continue
@@ -367,7 +379,12 @@ def parse_inp(path):
                 if data and not data.startswith("**"):
                     parts_line = [p.strip() for p in data.split(",")]
                     if len(parts_line) >= 2:
-                        ties.append((parts_line[0], parts_line[1]))
+                        ties.append(TieConstraint(
+                            parts_line[0],
+                            parts_line[1],
+                            adjust=opts.get("adjust", "yes").lower() != "no",
+                            no_rotation="no rotation" in opts,
+                        ))
                     break
             continue
 
@@ -406,7 +423,10 @@ def parse_inp(path):
                             gravity = (vals[0] * vals[1], vals[0] * vals[2], vals[0] * vals[3])
             continue
 
-    return parts, instances, materials, assembly_nsets, assembly_surfaces, ties, boundaries, loads, gravity
+    return (
+        parts, instances, materials, assembly_nsets, assembly_surfaces,
+        assembly_surface_types, ties, boundaries, loads, gravity,
+    )
 
 
 def flatten_model(parts, instances):
@@ -600,7 +620,11 @@ def surface_facets(master_nodes, flat_elements):
     return facets
 
 
-def master_surface_weights(source, master_nodes, flat_elements, nodes):
+def master_surface_weights(source, master_nodes, flat_elements, nodes, node_based=False):
+    if node_based:
+        master = nearest_node(source, master_nodes, nodes)
+        return [(master, 1.0)] if master is not None else []
+
     best = None
     for kind, conn in surface_facets(master_nodes, flat_elements):
         projected = project_to_quad(source, conn, nodes) if kind == "quad" else project_to_line(source, conn, nodes)
@@ -641,19 +665,20 @@ def compact_mpc_terms(terms):
             if abs(coeff) > 1.0e-14]
 
 
-def build_tie_mpcs(nodes, node_map, flat_elements, assembly_nsets, assembly_surfaces, ties):
+def build_tie_mpcs(nodes, node_map, flat_elements, assembly_nsets, assembly_surfaces, assembly_surface_types, ties):
     kinds = node_element_kinds(flat_elements)
     mpcs = []
     generated = 0
 
-    for slave_surface, master_surface in ties:
-        slave_nodes = surface_nodes(slave_surface, assembly_nsets, assembly_surfaces, node_map)
-        master_nodes = surface_nodes(master_surface, assembly_nsets, assembly_surfaces, node_map)
+    for tie in ties:
+        slave_nodes = surface_nodes(tie.slave_surface, assembly_nsets, assembly_surfaces, node_map)
+        master_nodes = surface_nodes(tie.master_surface, assembly_nsets, assembly_surfaces, node_map)
         if not slave_nodes or not master_nodes:
             continue
+        node_based_master = assembly_surface_types.get(tie.master_surface, "").upper() == "NODE"
 
         for slave in slave_nodes:
-            weights = master_surface_weights(slave, master_nodes, flat_elements, nodes)
+            weights = master_surface_weights(slave, master_nodes, flat_elements, nodes, node_based=node_based_master)
             sx, sy, sz = nodes[slave]
             cx = sum(nodes[nid][0] * weight for nid, weight in weights)
             cy = sum(nodes[nid][1] * weight for nid, weight in weights)
@@ -670,7 +695,7 @@ def build_tie_mpcs(nodes, node_map, flat_elements, assembly_nsets, assembly_surf
                 for master, weight in weights:
                     add_mpc_term(terms, master, comp + 1, -weight)
 
-                if slave_has_rot and master_is_solid:
+                if not tie.no_rotation and slave_has_rot and master_is_solid:
                     # u + theta x r. DOF order: ux,uy,uz,rx,ry,rz.
                     if comp == 0:
                         add_mpc_term(terms, slave, 5, rz)
@@ -687,7 +712,7 @@ def build_tie_mpcs(nodes, node_map, flat_elements, assembly_nsets, assembly_surf
                     mpcs.append(compact)
                     generated += 1
 
-            if slave_has_rot and master_has_rot:
+            if not tie.no_rotation and slave_has_rot and master_has_rot:
                 for dof in range(4, 7):
                     terms = {}
                     add_mpc_term(terms, slave, dof, 1.0)
@@ -833,12 +858,12 @@ def write_group(f, element_type, elements, mats, mat_map, parts, materials, kind
             f.write(f"{idx} " + " ".join(str(n) for n in conn) + f" {mset}\n")
 
 
-def write_dat(path, parts, instances, materials, assembly_nsets, assembly_surfaces, ties,
+def write_dat(path, parts, instances, materials, assembly_nsets, assembly_surfaces, assembly_surface_types, ties,
               boundaries, loads, gravity, cli_gravity, renumber, mode):
     nodes, node_map, flat_elements = flatten_model(parts, instances)
     nodes, node_map, flat_elements = renumber_nodes(nodes, node_map, flat_elements, renumber)
     mpcs, generated_mpcs = build_tie_mpcs(
-        nodes, node_map, flat_elements, assembly_nsets, assembly_surfaces, ties)
+        nodes, node_map, flat_elements, assembly_nsets, assembly_surfaces, assembly_surface_types, ties)
     bcs = apply_boundaries(boundaries, assembly_nsets, node_map)
     rotation_flags = node_rotation_flags(nodes, flat_elements)
 
@@ -926,8 +951,8 @@ def main():
     if output is None:
         output = args.inp[:-4] + ".dat" if args.inp.lower().endswith(".inp") else args.inp + ".dat"
 
-    parts, instances, materials, assembly_nsets, assembly_surfaces, ties, boundaries, loads, gravity = parse_inp(args.inp)
-    stats = write_dat(output, parts, instances, materials, assembly_nsets, assembly_surfaces, ties,
+    parts, instances, materials, assembly_nsets, assembly_surfaces, assembly_surface_types, ties, boundaries, loads, gravity = parse_inp(args.inp)
+    stats = write_dat(output, parts, instances, materials, assembly_nsets, assembly_surfaces, assembly_surface_types, ties,
                       boundaries, loads, gravity, tuple(args.gravity) if args.gravity else None,
                       args.renumber, args.mode)
 
