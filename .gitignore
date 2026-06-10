@@ -19,4 +19,10 @@ tests/
 build_eigen_check/
 build_eigen_run/
 cases/
+.vs/
+bridge3/
+docs/
+doc/
+report_figures/
+
     

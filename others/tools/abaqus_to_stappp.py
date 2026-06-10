@@ -361,13 +361,14 @@ def parse_inp(path):
             continue
 
         if in_assembly and keyword == "TIE":
+            no_rotation = opts.get("no rotation", False)
             while i < len(lines) and not lines[i].strip().startswith("*"):
                 data = lines[i].strip()
                 i += 1
                 if data and not data.startswith("**"):
                     parts_line = [p.strip() for p in data.split(",")]
                     if len(parts_line) >= 2:
-                        ties.append((parts_line[0], parts_line[1]))
+                        ties.append((parts_line[0], parts_line[1], no_rotation))
                     break
             continue
 
@@ -433,7 +434,7 @@ def flatten_model(parts, instances):
             for eid, conn, elset in elems:
                 flat_conn = [node_map[(inst["name"], nid)] for nid in conn]
                 resolved_elset = resolve_element_elset(part, etype, eid, elset)
-                flat_elements[etype].append((eid, flat_conn, inst["part"], resolved_elset))
+                flat_elements[etype].append((eid, flat_conn, inst["part"], resolved_elset, inst["rot_matrix"]))
 
     return nodes, node_map, flat_elements
 
@@ -586,15 +587,15 @@ def surface_facets(master_nodes, flat_elements):
         (3, 0, 4, 7),
     )
     for etype in ("C3D8R", "C3D8"):
-        for _eid, conn, _part_name, _elset in flat_elements[etype]:
+        for _eid, conn, _part_name, _elset, _rot in flat_elements[etype]:
             for face in h8_faces:
                 face_conn = tuple(conn[i] for i in face)
                 if all(nid in master_set for nid in face_conn):
                     facets.append(("quad", face_conn))
-    for _eid, conn, _part_name, _elset in flat_elements["S4R"]:
+    for _eid, conn, _part_name, _elset, _rot in flat_elements["S4R"]:
         if all(nid in master_set for nid in conn):
             facets.append(("quad", tuple(conn)))
-    for _eid, conn, _part_name, _elset in flat_elements["B31"]:
+    for _eid, conn, _part_name, _elset, _rot in flat_elements["B31"]:
         if all(nid in master_set for nid in conn):
             facets.append(("line", tuple(conn)))
     return facets
@@ -621,7 +622,7 @@ def node_element_kinds(flat_elements):
             has_rotation = True
         else:
             has_rotation = False
-        for _eid, conn, _part_name, _elset in elems:
+        for _eid, conn, _part_name, _elset, _rot in elems:
             for nid in conn:
                 entry = kinds.setdefault(nid, {"rotation": False, "solid": False})
                 entry["rotation"] = entry["rotation"] or has_rotation
@@ -646,7 +647,13 @@ def build_tie_mpcs(nodes, node_map, flat_elements, assembly_nsets, assembly_surf
     mpcs = []
     generated = 0
 
-    for slave_surface, master_surface in ties:
+    for tie_entry in ties:
+        if len(tie_entry) == 3:
+            slave_surface, master_surface, no_rotation = tie_entry
+        else:
+            slave_surface, master_surface = tie_entry
+            no_rotation = False
+
         slave_nodes = surface_nodes(slave_surface, assembly_nsets, assembly_surfaces, node_map)
         master_nodes = surface_nodes(master_surface, assembly_nsets, assembly_surfaces, node_map)
         if not slave_nodes or not master_nodes:
@@ -670,7 +677,7 @@ def build_tie_mpcs(nodes, node_map, flat_elements, assembly_nsets, assembly_surf
                 for master, weight in weights:
                     add_mpc_term(terms, master, comp + 1, -weight)
 
-                if slave_has_rot and master_is_solid:
+                if slave_has_rot and master_is_solid and not no_rotation:
                     # u + theta x r. DOF order: ux,uy,uz,rx,ry,rz.
                     if comp == 0:
                         add_mpc_term(terms, slave, 5, rz)
@@ -687,7 +694,7 @@ def build_tie_mpcs(nodes, node_map, flat_elements, assembly_nsets, assembly_surf
                     mpcs.append(compact)
                     generated += 1
 
-            if slave_has_rot and master_has_rot:
+            if slave_has_rot and master_has_rot and not no_rotation:
                 for dof in range(4, 7):
                     terms = {}
                     add_mpc_term(terms, slave, dof, 1.0)
@@ -704,7 +711,7 @@ def build_tie_mpcs(nodes, node_map, flat_elements, assembly_nsets, assembly_surf
 def build_node_adjacency(nodes, flat_elements):
     adjacency = {nid: set() for nid in nodes}
     for elems in flat_elements.values():
-        for _eid, conn, _part_name, _elset in elems:
+        for _eid, conn, _part_name, _elset, _rot in elems:
             unique_conn = list(dict.fromkeys(conn))
             for i, nid in enumerate(unique_conn):
                 neighbors = adjacency[nid]
@@ -776,7 +783,7 @@ def apply_boundaries(boundary_specs, assembly_nsets, node_map):
 def node_rotation_flags(nodes, flat_elements):
     flags = {nid: [1, 1, 1] for nid in nodes}
     for etype in ("S4R", "B31"):
-        for _eid, conn, _part_name, _elset in flat_elements[etype]:
+        for _eid, conn, _part_name, _elset, _rot in flat_elements[etype]:
             for nid in conn:
                 flags[nid] = [0, 0, 0]
     return flags
@@ -808,7 +815,7 @@ def material_key(kind, part, elset, materials):
 def build_material_map(elements, parts, materials, kind):
     mats = []
     mapping = {}
-    for _eid, _conn, part_name, elset in elements:
+    for _eid, _conn, part_name, elset, _rot in elements:
         key = material_key(kind, parts[part_name], elset, materials)
         if None in key:
             continue
@@ -823,11 +830,14 @@ def write_group(f, element_type, elements, mats, mat_map, parts, materials, kind
     for idx, mat in enumerate(mats, start=1):
         f.write(f"{idx} " + " ".join(str(v) for v in mat) + "\n")
 
-    for idx, (_eid, conn, part_name, elset) in enumerate(elements, start=1):
+    for idx, (_eid, conn, part_name, elset, rot_matrix) in enumerate(elements, start=1):
         key = material_key(kind, parts[part_name], elset, materials)
         mset = mat_map[key]
         if element_type == 5:
             ref = parts[part_name]["beam_sections"].get(elset, {}).get("ref", (0.0, 0.0, 1.0))
+            # Apply instance rotation to beam reference direction (refrot fix)
+            if rot_matrix is not None:
+                ref = matmul_vec(rot_matrix, ref)
             f.write(f"{idx} {conn[0]} {conn[1]} {mset} {ref[0]} {ref[1]} {ref[2]}\n")
         else:
             f.write(f"{idx} " + " ".join(str(n) for n in conn) + f" {mset}\n")
