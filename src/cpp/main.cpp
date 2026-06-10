@@ -56,14 +56,22 @@ int main(int argc, char *argv[])
 		cerr << "*** Error *** Data input failed!" << endl;
 		exit(1);
 	}
+    cerr << "Input read. Results will be saved to " << OutFile << endl;
     
     double time_input = timer.ElapsedTime();
 
     COutputter* Output = COutputter::GetInstance();
+    bool modelOutput = Output->ModelOutputEnabled();
+    bool resultOutput = Output->ResultOutputEnabled();
+    bool vtkOutput = Output->VtkOutputEnabled();
 
 #ifdef STAPPP_USE_EIGEN
     const char* sparseEnv = std::getenv("STAPPP_SPARSE_ASSEMBLY");
+#ifdef STAPPP_USE_PARDISO
+    bool useSparseAssembly = true;
+#else
     bool useSparseAssembly = false;
+#endif
     if (sparseEnv)
     {
         string value(sparseEnv);
@@ -94,19 +102,22 @@ int main(int argc, char *argv[])
         FEMData->AssembleSparseStiffnessMatrix(SparseStiffnessMatrix);
         FEMData->ApplyDisplacementPenalty(SparseStiffnessMatrix);
 
-        *Output << "	TOTAL SPARSE SYSTEM DATA" << endl
-                << endl
-                << "     NUMBER OF EQUATIONS . . . . . . . . . . . . . .(NEQ) = "
-                << FEMData->GetNEQ() << endl
-                << "     NUMBER OF SPARSE NONZEROS . . . . . . . . . . .      = "
-                << SparseStiffnessMatrix.nonZeros() << endl
-                << "     ESTIMATED SPARSE STORAGE BYTES . . . . . . . . .     = "
-                << static_cast<unsigned long long>(SparseStiffnessMatrix.nonZeros()) *
-                       (sizeof(double) + sizeof(int))
-                   + static_cast<unsigned long long>(SparseStiffnessMatrix.outerSize() + 1) * sizeof(int)
-                << endl
-                << endl
-                << endl;
+        if (modelOutput)
+        {
+            *Output << "	TOTAL SPARSE SYSTEM DATA" << endl
+                    << endl
+                    << "     NUMBER OF EQUATIONS . . . . . . . . . . . . . .(NEQ) = "
+                    << FEMData->GetNEQ() << endl
+                    << "     NUMBER OF SPARSE NONZEROS . . . . . . . . . . .      = "
+                    << SparseStiffnessMatrix.nonZeros() << endl
+                    << "     ESTIMATED SPARSE STORAGE BYTES . . . . . . . . .     = "
+                    << static_cast<unsigned long long>(SparseStiffnessMatrix.nonZeros()) *
+                           (sizeof(double) + sizeof(int))
+                       + static_cast<unsigned long long>(SparseStiffnessMatrix.outerSize() + 1) * sizeof(int)
+                    << endl
+                    << endl
+                    << endl;
+        }
 
         if (FEMData->GetMODEX() == 2)
         {
@@ -140,6 +151,7 @@ int main(int argc, char *argv[])
     }
     
     double time_assemble = timer.ElapsedTime();
+    cerr << "Stiffness matrix assembled." << endl;
 
 //  Solve the linear equilibrium equations for displacements
     
@@ -147,6 +159,7 @@ int main(int argc, char *argv[])
     Solver->LDLT();
 
     double time_factorization = timer.ElapsedTime();
+    cerr << "Factorization completed." << endl;
 
 #ifdef _DEBUG_
     Output->PrintStiffnessMatrix();
@@ -169,19 +182,30 @@ int main(int argc, char *argv[])
         double time_case_solved = timer.ElapsedTime();
         time_load_solution += time_case_solved - time_case_start;
 
-        *Output << " LOAD CASE" << setw(5) << lcase + 1 << endl << endl << endl;
+        if (resultOutput)
+            *Output << " LOAD CASE" << setw(5) << lcase + 1 << endl << endl << endl;
 
 #ifdef _DEBUG_
         Output->PrintDisplacement();
 #endif
             
-        Output->OutputNodalDisplacement();
+        if (resultOutput)
+            Output->OutputNodalDisplacement();
 
 //      Calculate and output stresses of all elements
-        Output->OutputElementStress();
+        if (resultOutput)
+            Output->OutputElementStress();
 
-        string VTKFile = filename + "_lc" + to_string(lcase + 1) + ".vtu";
-        CVTKOutputter::WriteVTU(VTKFile, lcase + 1);
+        if (vtkOutput)
+        {
+            string VTKFile = filename + "_lc" + to_string(lcase + 1) + ".vtu";
+            CVTKOutputter::WriteVTU(VTKFile, lcase + 1);
+            cerr << "Load case " << lcase + 1 << " solved. VTK saved to " << VTKFile << endl;
+        }
+        else
+        {
+            cerr << "Load case " << lcase + 1 << " solved." << endl;
+        }
 
         double time_case_output = timer.ElapsedTime();
         time_output += time_case_output - time_case_solved;
@@ -198,6 +222,8 @@ int main(int argc, char *argv[])
             << "     TIME FOR LOAD CASE SOLUTIONS = " << time_load_solution << endl
             << "     TIME FOR RESULT OUTPUT = " << time_output << endl << endl
             << "     T O T A L   S O L U T I O N   T I M E = " << time_solution << endl << endl;
+
+    cerr << "Done. Report saved to " << OutFile << endl;
 
     delete Solver;
 

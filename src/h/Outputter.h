@@ -24,6 +24,21 @@ private:
 //!	File stream for output
 	ofstream OutputFile;
 
+//! Mirror report output to console
+    bool ConsoleOutput_;
+
+//! Write detailed model/result tables
+    bool DetailedOutput_;
+
+//! Write input/model echo tables
+    bool ModelOutput_;
+
+//! Write result tables
+    bool ResultOutput_;
+
+//! Write VTK result files
+    bool VtkOutput_;
+
 //!	Designed as a single instance class
 	static COutputter* _instance;
 
@@ -34,6 +49,18 @@ public:
 
 //!	Return pointer to the output file stream
 	inline ofstream* GetOutputFile() { return &OutputFile; }
+
+//!	Return whether detailed output tables are enabled
+    inline bool DetailedOutputEnabled() const { return DetailedOutput_; }
+
+//!	Return whether input/model echo tables are enabled
+    inline bool ModelOutputEnabled() const { return ModelOutput_; }
+
+//!	Return whether result tables are enabled
+    inline bool ResultOutputEnabled() const { return ResultOutput_; }
+
+//!	Return whether VTK result files are enabled
+    inline bool VtkOutputEnabled() const { return VtkOutput_; }
 
 //!	Return the single instance of the class
 	static COutputter* GetInstance(string FileName = " ");
@@ -81,7 +108,8 @@ public:
 	template <typename T>
 	COutputter& operator<<(const T& item) 
 	{
-		std::cout << item;
+		if (ConsoleOutput_)
+			std::cout << item;
 		OutputFile << item;
 		return *this;
 	}
@@ -89,7 +117,8 @@ public:
 	typedef std::basic_ostream<char, std::char_traits<char> > CharOstream;
 	COutputter& operator<<(CharOstream& (*op)(CharOstream&)) 
 	{
-		op(std::cout);
+		if (ConsoleOutput_)
+			op(std::cout);
 		op(OutputFile);
 		return *this;
 	}

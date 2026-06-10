@@ -20,6 +20,11 @@
 #include <Eigen/IterativeLinearSolvers>
 #endif
 
+#ifdef STAPPP_USE_PARDISO
+#include <mkl_pardiso.h>
+#include <mkl_types.h>
+#endif
+
 #include <vector>
 
 //!	LDLT solver: A in core solver using skyline storage  and column reduction scheme
@@ -45,6 +50,21 @@ private:
     bool UseLLT_;
     bool UseSparseLU_;
     bool UseCG_;
+#ifdef STAPPP_USE_PARDISO
+    std::vector<MKL_INT> PardisoIa_;
+    std::vector<MKL_INT> PardisoJa_;
+    std::vector<double> PardisoA_;
+    void* PardisoPt_[64];
+    MKL_INT PardisoIparm_[64];
+    MKL_INT PardisoMaxfct_;
+    MKL_INT PardisoMnum_;
+    MKL_INT PardisoMtype_;
+    MKL_INT PardisoN_;
+    MKL_INT PardisoMsglvl_;
+    MKL_INT PardisoError_;
+    bool UsePardiso_;
+    bool PardisoInitialized_;
+#endif
 #endif
 
 public:
@@ -56,6 +76,9 @@ public:
 //!	Constructor for direct Eigen sparse assembly
 	CLDLTSolver(const Eigen::SparseMatrix<double>* K, const std::vector<CMpcConstraint>& MpcConstraints);
 #endif
+
+//! Destructor
+    ~CLDLTSolver();
 
 //!	Perform L*D*L(T) factorization of the stiffness matrix
 	void LDLT();

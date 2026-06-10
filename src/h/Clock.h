@@ -18,7 +18,7 @@
 
 #pragma once
 
-#include <time.h>
+#include <chrono>
 #include <iostream>
 
 using namespace std;  
@@ -29,7 +29,7 @@ class Clock
 
 private:
 
-	clock_t t0_, t1_;
+	std::chrono::steady_clock::time_point t0_, t1_;
 	double ct_;
 	bool st0_;   //!< Flag for Start method
 	bool st1_;   //!< Flag for Stop method

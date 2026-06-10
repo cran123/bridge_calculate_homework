@@ -32,8 +32,24 @@ CLDLTSolver::CLDLTSolver(CSkylineMatrix<double>* K, const vector<CMpcConstraint>
     , UseLLT_(false)
     , UseSparseLU_(false)
     , UseCG_(false)
+#ifdef STAPPP_USE_PARDISO
+    , PardisoMaxfct_(1)
+    , PardisoMnum_(1)
+    , PardisoMtype_(-2)
+    , PardisoN_(0)
+    , PardisoMsglvl_(0)
+    , PardisoError_(0)
+    , UsePardiso_(false)
+    , PardisoInitialized_(false)
+#endif
 #endif
 {
+#ifdef STAPPP_USE_PARDISO
+    for (unsigned int i = 0; i < 64; i++)
+        PardisoPt_[i] = nullptr;
+    for (unsigned int i = 0; i < 64; i++)
+        PardisoIparm_[i] = 0;
+#endif
 }
 
 #ifdef STAPPP_USE_EIGEN
@@ -45,7 +61,23 @@ CLDLTSolver::CLDLTSolver(const Eigen::SparseMatrix<double>* K, const vector<CMpc
     , UseLLT_(false)
     , UseSparseLU_(false)
     , UseCG_(false)
+#ifdef STAPPP_USE_PARDISO
+    , PardisoMaxfct_(1)
+    , PardisoMnum_(1)
+    , PardisoMtype_(-2)
+    , PardisoN_(0)
+    , PardisoMsglvl_(0)
+    , PardisoError_(0)
+    , UsePardiso_(false)
+    , PardisoInitialized_(false)
+#endif
 {
+#ifdef STAPPP_USE_PARDISO
+    for (unsigned int i = 0; i < 64; i++)
+        PardisoPt_[i] = nullptr;
+    for (unsigned int i = 0; i < 64; i++)
+        PardisoIparm_[i] = 0;
+#endif
 }
 
 namespace
@@ -288,8 +320,59 @@ namespace
             return fallback;
         return atof(value);
     }
+
+#ifdef STAPPP_USE_PARDISO
+    void FillPardisoCsr(const Eigen::SparseMatrix<double>& matrix, MKL_INT mtype,
+        vector<MKL_INT>& ia, vector<MKL_INT>& ja, vector<double>& a)
+    {
+        typedef Eigen::SparseMatrix<double, Eigen::RowMajor> RowMajorSparseMatrix;
+        RowMajorSparseMatrix rowMajor(matrix);
+        rowMajor.makeCompressed();
+
+        const MKL_INT n = static_cast<MKL_INT>(rowMajor.rows());
+        const bool symmetricStorage = (mtype == 2 || mtype == -2);
+        ia.resize(static_cast<size_t>(n) + 1);
+        ja.clear();
+        a.clear();
+        ja.reserve(rowMajor.nonZeros());
+        a.reserve(rowMajor.nonZeros());
+
+        const int* outer = rowMajor.outerIndexPtr();
+        const int* inner = rowMajor.innerIndexPtr();
+        const double* values = rowMajor.valuePtr();
+
+        ia[0] = 1;
+        for (MKL_INT i = 0; i < n; i++)
+        {
+            for (int k = outer[i]; k < outer[i + 1]; k++)
+            {
+                if (symmetricStorage && inner[k] < i)
+                    continue;
+                ja.push_back(static_cast<MKL_INT>(inner[k]) + 1);
+                a.push_back(values[k]);
+            }
+            ia[static_cast<size_t>(i) + 1] = static_cast<MKL_INT>(ja.size()) + 1;
+        }
+    }
+#endif
 }
 #endif
+
+CLDLTSolver::~CLDLTSolver()
+{
+#ifdef STAPPP_USE_PARDISO
+    if (PardisoInitialized_)
+    {
+        MKL_INT phase = -1;
+        MKL_INT nrhs = 0;
+        double ddum = 0.0;
+        MKL_INT idum = 0;
+        pardiso(PardisoPt_, &PardisoMaxfct_, &PardisoMnum_, &PardisoMtype_, &phase,
+            &PardisoN_, &ddum, PardisoIa_.data(), PardisoJa_.data(), &idum, &nrhs,
+            PardisoIparm_, &PardisoMsglvl_, &ddum, &ddum, &PardisoError_);
+    }
+#endif
+}
 
 // LDLT facterization
 void CLDLTSolver::LDLT()
@@ -306,6 +389,57 @@ void CLDLTSolver::LDLT()
     ReducedK_.makeCompressed();
 
     const char* solverMode = getenv("STAPPP_SOLVER");
+#ifdef STAPPP_USE_PARDISO
+    if (!solverMode || IsEnabledEnv(solverMode, "pardiso"))
+    {
+        UsePardiso_ = true;
+        UseCG_ = false;
+        UseLLT_ = false;
+        UseSparseLU_ = false;
+
+        PardisoN_ = static_cast<MKL_INT>(ReducedK_.rows());
+        PardisoMtype_ = static_cast<MKL_INT>(EnvInt("STAPPP_PARDISO_MTYPE", -2));
+        PardisoMsglvl_ = static_cast<MKL_INT>(EnvInt("STAPPP_PARDISO_MSGLVL", 0));
+        FillPardisoCsr(ReducedK_, PardisoMtype_, PardisoIa_, PardisoJa_, PardisoA_);
+
+        for (unsigned int i = 0; i < 64; i++)
+        {
+            PardisoPt_[i] = nullptr;
+            PardisoIparm_[i] = 0;
+        }
+        pardisoinit(PardisoPt_, &PardisoMtype_, PardisoIparm_);
+        PardisoIparm_[0] = 1;
+        PardisoIparm_[1] = 2;
+        PardisoIparm_[7] = 2;
+        PardisoIparm_[9] = 13;
+        PardisoIparm_[17] = -1;
+        PardisoIparm_[18] = -1;
+        PardisoIparm_[26] = 1;
+        PardisoIparm_[34] = 0;
+
+        MKL_INT phase = 12;
+        MKL_INT nrhs = 1;
+        MKL_INT idum = 0;
+        double ddum = 0.0;
+        pardiso(PardisoPt_, &PardisoMaxfct_, &PardisoMnum_, &PardisoMtype_, &phase,
+            &PardisoN_, PardisoA_.data(), PardisoIa_.data(), PardisoJa_.data(), &idum,
+            &nrhs, PardisoIparm_, &PardisoMsglvl_, &ddum, &ddum, &PardisoError_);
+        if (PardisoError_ != 0)
+        {
+            cerr << "*** Error *** Intel oneMKL PARDISO factorization failed. error = "
+                 << PardisoError_ << endl;
+            PrintReducedMatrixDiagnostics(ReducedK_, ReducedIndex_);
+            exit(4);
+        }
+
+        PardisoInitialized_ = true;
+        Factorized_ = true;
+        cerr << "    Intel oneMKL PARDISO solver prepared."
+             << " mtype=" << PardisoMtype_
+             << " nonzeros=" << PardisoA_.size() << endl;
+        return;
+    }
+#endif
     if (IsEnabledEnv(solverMode, "pcg_ic"))
     {
         UseCG_ = true;
@@ -423,6 +557,27 @@ void CLDLTSolver::BackSubstitution(double* Force)
     Eigen::VectorXd reducedRhs = Transform_.transpose() * rhs;
     Eigen::VectorXd solution;
     Eigen::ComputationInfo info;
+#ifdef STAPPP_USE_PARDISO
+    if (UsePardiso_)
+    {
+        solution = Eigen::VectorXd::Zero(reducedRhs.size());
+        MKL_INT phase = 33;
+        MKL_INT nrhs = 1;
+        MKL_INT idum = 0;
+        pardiso(PardisoPt_, &PardisoMaxfct_, &PardisoMnum_, &PardisoMtype_, &phase,
+            &PardisoN_, PardisoA_.data(), PardisoIa_.data(), PardisoJa_.data(), &idum,
+            &nrhs, PardisoIparm_, &PardisoMsglvl_, reducedRhs.data(), solution.data(),
+            &PardisoError_);
+        if (PardisoError_ != 0)
+        {
+            cerr << "*** Error *** Intel oneMKL PARDISO solve failed. error = "
+                 << PardisoError_ << endl;
+            exit(4);
+        }
+        info = Eigen::Success;
+    }
+    else
+#endif
     if (UseCG_)
     {
         solution = CgSolver_.solve(reducedRhs);

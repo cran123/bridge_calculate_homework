@@ -9,6 +9,7 @@
 /*****************************************************************************/
 
 #include <cmath>
+#include <cstdlib>
 #include <ctime>
 
 #include "Beam3D2.h"
@@ -40,6 +41,23 @@ COutputter* COutputter::_instance = nullptr;
 //	Constructor
 COutputter::COutputter(string FileName)
 {
+	const char* consoleEnv = getenv("STAPPP_CONSOLE_OUTPUT");
+	ConsoleOutput_ = consoleEnv && string(consoleEnv) != "0"
+		&& string(consoleEnv) != "false" && string(consoleEnv) != "FALSE";
+	const char* fastEnv = getenv("STAPPP_FAST_OUTPUT");
+	bool fastOutput = fastEnv && string(fastEnv) != "0"
+		&& string(fastEnv) != "false" && string(fastEnv) != "FALSE";
+	const char* resultEnv = getenv("STAPPP_RESULT_OUTPUT");
+	const char* vtkEnv = getenv("STAPPP_VTK_OUTPUT");
+	ModelOutput_ = !fastOutput;
+	ResultOutput_ = !(resultEnv && (string(resultEnv) == "0"
+		|| string(resultEnv) == "false" || string(resultEnv) == "FALSE"));
+	VtkOutput_ = !fastOutput;
+	if (vtkEnv)
+		VtkOutput_ = string(vtkEnv) != "0"
+			&& string(vtkEnv) != "false" && string(vtkEnv) != "FALSE";
+	DetailedOutput_ = ModelOutput_ || ResultOutput_;
+
 	OutputFile.open(FileName);
 
 	if (!OutputFile)

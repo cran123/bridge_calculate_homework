@@ -21,3 +21,5 @@ build_eigen_run/
 cases/
 *.zip
 third_party/
+build_pardiso_check/
+build_pardiso/

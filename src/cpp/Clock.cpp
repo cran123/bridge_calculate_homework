@@ -28,7 +28,7 @@ Clock::Clock()
 // Start the clock
 void Clock::Start() 
 { 
-	t0_ = clock();  
+	t0_ = std::chrono::steady_clock::now();
 	st0_ = true; 
 }
 
@@ -43,8 +43,8 @@ void Clock::Stop()
 
 	if(!st1_)
 	{
-		t1_ = clock(); 
-		ct_ += (double) (t1_ - t0_); 
+		t1_ = std::chrono::steady_clock::now();
+		ct_ += std::chrono::duration<double>(t1_ - t0_).count();
 		st1_ = true;
 	}
 }
@@ -64,7 +64,7 @@ void Clock::Resume()
 	}
 	else  
 	{
-		t0_ = clock();
+		t0_ = std::chrono::steady_clock::now();
 		st1_ = false;
 	}
 }
@@ -90,9 +90,9 @@ double Clock::ElapsedTime()
 		elapsed = ct_;
 	else
 	{
-		t1_ = clock(); 
-		elapsed = ct_ + (double) (t1_ - t0_); 
+		t1_ = std::chrono::steady_clock::now();
+		elapsed = ct_ + std::chrono::duration<double>(t1_ - t0_).count();
 	}
 
-	return elapsed / CLOCKS_PER_SEC;
+	return elapsed;
 }

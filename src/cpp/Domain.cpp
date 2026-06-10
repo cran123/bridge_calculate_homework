@@ -94,27 +94,36 @@ bool CDomain::ReadData(string FileName, string OutFile)
 	}
 
 	COutputter* Output = COutputter::GetInstance(OutFile);
+	bool modelOutput = Output->ModelOutputEnabled();
 
 //	Read the heading line
 	Input.getline(Title, 256);
-	Output->OutputHeading();
+	if (modelOutput)
+		Output->OutputHeading();
 
 //	Read the control line
 	Input >> NUMNP >> NUMEG >> NLCASE >> MODEX;
 
 //	Read nodal point data
 	if (ReadNodalPoints())
-        Output->OutputNodeInfo();
+	{
+		if (modelOutput)
+			Output->OutputNodeInfo();
+	}
     else
         return false;
 
 //	Update equation number
 	CalculateEquationNumber();
-	Output->OutputEquationNumber();
+	if (modelOutput)
+		Output->OutputEquationNumber();
 
 //	Read load data
 	if (ReadLoadCases())
-        Output->OutputLoadInfo();
+	{
+		if (modelOutput)
+			Output->OutputLoadInfo();
+	}
     else
         return false;
 
@@ -124,7 +133,10 @@ bool CDomain::ReadData(string FileName, string OutFile)
 
 //	Read element data
 	if (ReadElements())
-        Output->OutputElementInfo();
+	{
+		if (modelOutput)
+			Output->OutputElementInfo();
+	}
     else
         return false;
 
@@ -358,8 +370,9 @@ void CDomain::AllocateMatrices()
     //    Allocate for banded global stiffness matrix
     StiffnessMatrix->Allocate();
     
-    COutputter* Output = COutputter::GetInstance();
-    Output->OutputTotalSystemData();
+	COutputter* Output = COutputter::GetInstance();
+	if (Output->ModelOutputEnabled())
+		Output->OutputTotalSystemData();
 }
 
 #ifdef STAPPP_USE_EIGEN
