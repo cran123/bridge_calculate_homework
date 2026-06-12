@@ -167,6 +167,7 @@ int main(int argc, char *argv[])
 
     double time_load_solution = 0.0;
     double time_output = 0.0;
+    double time_solve_completed = time_factorization;
 
 //  Loop over for all load cases
     for (unsigned int lcase = 0; lcase < FEMData->GetNLCASE(); lcase++)
@@ -181,6 +182,7 @@ int main(int argc, char *argv[])
 
         double time_case_solved = timer.ElapsedTime();
         time_load_solution += time_case_solved - time_case_start;
+        time_solve_completed = time_case_solved;
 
         if (resultOutput)
             *Output << " LOAD CASE" << setw(5) << lcase + 1 << endl << endl << endl;
@@ -214,15 +216,19 @@ int main(int argc, char *argv[])
     double time_solution = timer.ElapsedTime();
     
     timer.Stop();
-    
-    *Output << "\n S O L U T I O N   T I M E   L O G   I N   S E C \n\n"
-            << "     TIME FOR INPUT PHASE = " << time_input << endl
-            << "     TIME FOR CALCULATION OF STIFFNESS MATRIX = " << time_assemble - time_input << endl
-            << "     TIME FOR FACTORIZATION = " << time_factorization - time_assemble << endl
-            << "     TIME FOR LOAD CASE SOLUTIONS = " << time_load_solution << endl
-            << "     TIME FOR RESULT OUTPUT = " << time_output << endl << endl
-            << "     T O T A L   S O L U T I O N   T I M E = " << time_solution << endl << endl;
 
+    double competition_solve_time = time_solve_completed - time_input;
+    
+    (void)time_load_solution;
+    (void)time_output;
+    (void)time_solution;
+
+    *Output << "\n P E R F O R M A N C E   M E T R I C S \n\n"
+            << "     COMPETITION SOLVE WALL TIME AFTER INPUT BEFORE OUTPUT, SEC = "
+            << competition_solve_time << endl << endl;
+
+    cerr << "Competition solve wall time after input before output = "
+         << competition_solve_time << " sec" << endl;
     cerr << "Done. Report saved to " << OutFile << endl;
 
     delete Solver;

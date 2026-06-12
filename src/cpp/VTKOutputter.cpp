@@ -11,6 +11,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <vector>
 
 using namespace std;
 
@@ -35,17 +36,18 @@ namespace
 			case ElementTypes::Plate:
 				return 9;	// VTK_QUAD
 			case ElementTypes::H8:
+			case ElementTypes::BbarH8:
 				return 12;	// VTK_HEXAHEDRON
 			default:
 				return 0;
 		}
 	}
 
-	void WriteZeroCellField(ofstream& output, const char* name, unsigned int totalCells)
+	void WriteCellField(ofstream& output, const char* name, unsigned int totalCells, const vector<double>& values)
 	{
 		output << "        <DataArray type=\"Float64\" Name=\"" << name << "\" format=\"ascii\">\n";
 		for (unsigned int i = 0; i < totalCells; i++)
-			output << "          0\n";
+			output << "          " << values[i] << "\n";
 		output << "        </DataArray>\n";
 	}
 }
@@ -161,64 +163,92 @@ bool CVTKOutputter::WriteVTU(const string& FileName, unsigned int LoadCase)
 	}
 	output << "        </DataArray>\n";
 
-	WriteZeroCellField(output, "VonMises", totalCells);
-	WriteZeroCellField(output, "SXX", totalCells);
-	WriteZeroCellField(output, "SYY", totalCells);
-	WriteZeroCellField(output, "SZZ", totalCells);
-	WriteZeroCellField(output, "SXY", totalCells);
-	WriteZeroCellField(output, "SYZ", totalCells);
-	WriteZeroCellField(output, "SXZ", totalCells);
-	WriteZeroCellField(output, "MX", totalCells);
-	WriteZeroCellField(output, "MY", totalCells);
-	WriteZeroCellField(output, "MXY", totalCells);
+	vector<double> vonMises(totalCells, 0.0);
+	vector<double> sxx(totalCells, 0.0);
+	vector<double> syy(totalCells, 0.0);
+	vector<double> szz(totalCells, 0.0);
+	vector<double> sxy(totalCells, 0.0);
+	vector<double> syz(totalCells, 0.0);
+	vector<double> sxz(totalCells, 0.0);
+	vector<double> mx(totalCells, 0.0);
+	vector<double> my(totalCells, 0.0);
+	vector<double> mxy(totalCells, 0.0);
+	vector<double> axialForce(totalCells, 0.0);
+	vector<double> beamMy(totalCells, 0.0);
+	vector<double> beamMz(totalCells, 0.0);
+	vector<double> beamTorque(totalCells, 0.0);
 
-	output << "        <DataArray type=\"Float64\" Name=\"AxialForce\" format=\"ascii\">\n";
+	unsigned int cell = 0;
 	for (unsigned int eg = 0; eg < NUMEG; eg++)
 	{
 		CElementGroup& group = FEMData->GetEleGrpList()[eg];
 		for (unsigned int e = 0; e < group.GetNUME(); e++)
 		{
-			double value = 0.0;
 			if (group.GetElementType() == ElementTypes::Bar)
 			{
 				double stress = 0.0;
 				group[e].ElementStress(&stress, Displacement);
 				CBarMaterial& material = *dynamic_cast<CBarMaterial*>(group[e].GetElementMaterial());
-				value = stress * material.Area;
+				sxx[cell] = stress;
+				axialForce[cell] = stress * material.Area;
 			}
 			else if (group.GetElementType() == ElementTypes::Beam)
 			{
 				double stress[6] = {};
 				group[e].ElementStress(stress, Displacement);
-				value = stress[0];
+				axialForce[cell] = stress[0];
+				beamMy[cell] = stress[1];
+				beamMz[cell] = stress[2];
+				beamTorque[cell] = stress[3];
+				sxy[cell] = stress[4];
+				sxz[cell] = stress[5];
 			}
-			output << "          " << value << "\n";
-		}
-	}
-	output << "        </DataArray>\n";
-
-	const char* beamNames[3] = {"BeamMy", "BeamMz", "BeamTorque"};
-	unsigned int beamIndex[3] = {1, 2, 3};
-	for (unsigned int field = 0; field < 3; field++)
-	{
-		output << "        <DataArray type=\"Float64\" Name=\"" << beamNames[field] << "\" format=\"ascii\">\n";
-		for (unsigned int eg = 0; eg < NUMEG; eg++)
-		{
-			CElementGroup& group = FEMData->GetEleGrpList()[eg];
-			for (unsigned int e = 0; e < group.GetNUME(); e++)
+			else if (group.GetElementType() == ElementTypes::H8 || group.GetElementType() == ElementTypes::BbarH8)
 			{
-				double value = 0.0;
-				if (group.GetElementType() == ElementTypes::Beam)
-				{
-					double stress[6] = {};
-					group[e].ElementStress(stress, Displacement);
-					value = stress[beamIndex[field]];
-				}
-				output << "          " << value << "\n";
+				double stress[6] = {};
+				group[e].ElementStress(stress, Displacement);
+				sxx[cell] = stress[0];
+				syy[cell] = stress[1];
+				szz[cell] = stress[2];
+				sxy[cell] = stress[3];
+				syz[cell] = stress[4];
+				sxz[cell] = stress[5];
+				vonMises[cell] = sqrt(0.5 * ((sxx[cell] - syy[cell]) * (sxx[cell] - syy[cell])
+					+ (syy[cell] - szz[cell]) * (syy[cell] - szz[cell])
+					+ (szz[cell] - sxx[cell]) * (szz[cell] - sxx[cell]))
+					+ 3.0 * (sxy[cell] * sxy[cell] + syz[cell] * syz[cell] + sxz[cell] * sxz[cell]));
 			}
+			else if (group.GetElementType() == ElementTypes::Plate)
+			{
+				double stress[7] = {};
+				group[e].ElementStress(stress, Displacement);
+				sxx[cell] = stress[0];
+				syy[cell] = stress[1];
+				sxy[cell] = stress[2];
+				mx[cell] = stress[3];
+				my[cell] = stress[4];
+				mxy[cell] = stress[5];
+				vonMises[cell] = sqrt(sxx[cell] * sxx[cell] - sxx[cell] * syy[cell]
+					+ syy[cell] * syy[cell] + 3.0 * sxy[cell] * sxy[cell]);
+			}
+			cell++;
 		}
-		output << "        </DataArray>\n";
 	}
+
+	WriteCellField(output, "VonMises", totalCells, vonMises);
+	WriteCellField(output, "SXX", totalCells, sxx);
+	WriteCellField(output, "SYY", totalCells, syy);
+	WriteCellField(output, "SZZ", totalCells, szz);
+	WriteCellField(output, "SXY", totalCells, sxy);
+	WriteCellField(output, "SYZ", totalCells, syz);
+	WriteCellField(output, "SXZ", totalCells, sxz);
+	WriteCellField(output, "MX", totalCells, mx);
+	WriteCellField(output, "MY", totalCells, my);
+	WriteCellField(output, "MXY", totalCells, mxy);
+	WriteCellField(output, "AxialForce", totalCells, axialForce);
+	WriteCellField(output, "BeamMy", totalCells, beamMy);
+	WriteCellField(output, "BeamMz", totalCells, beamMz);
+	WriteCellField(output, "BeamTorque", totalCells, beamTorque);
 
 	output << "      </CellData>\n";
 	output << "    </Piece>\n";

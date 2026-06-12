@@ -416,6 +416,7 @@ void CLDLTSolver::LDLT()
         PardisoIparm_[18] = -1;
         PardisoIparm_[26] = 1;
         PardisoIparm_[34] = 0;
+        PardisoIparm_[59] = EnvInt("STAPPP_PARDISO_OOC", 0);
 
         MKL_INT phase = 12;
         MKL_INT nrhs = 1;
@@ -436,6 +437,7 @@ void CLDLTSolver::LDLT()
         Factorized_ = true;
         cerr << "    Intel oneMKL PARDISO solver prepared."
              << " mtype=" << PardisoMtype_
+             << " ooc=" << PardisoIparm_[59]
              << " nonzeros=" << PardisoA_.size() << endl;
         return;
     }
