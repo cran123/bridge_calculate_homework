@@ -46,6 +46,7 @@ private:
     Eigen::ConjugateGradient<Eigen::SparseMatrix<double>, Eigen::Lower | Eigen::Upper,
         Eigen::IncompleteCholesky<double> > CgSolver_;
     std::vector<int> ReducedIndex_;
+    unsigned int SparseDimension_;
     bool Factorized_;
     bool UseLLT_;
     bool UseSparseLU_;

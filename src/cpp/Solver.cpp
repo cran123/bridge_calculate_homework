@@ -28,6 +28,7 @@ CLDLTSolver::CLDLTSolver(CSkylineMatrix<double>* K, const vector<CMpcConstraint>
     , MpcConstraints_(MpcConstraints)
 #ifdef STAPPP_USE_EIGEN
     , SparseInput_(nullptr)
+    , SparseDimension_(0)
     , Factorized_(false)
     , UseLLT_(false)
     , UseSparseLU_(false)
@@ -57,6 +58,7 @@ CLDLTSolver::CLDLTSolver(const Eigen::SparseMatrix<double>* K, const vector<CMpc
     : K_(nullptr)
     , MpcConstraints_(MpcConstraints)
     , SparseInput_(K)
+    , SparseDimension_(0)
     , Factorized_(false)
     , UseLLT_(false)
     , UseSparseLU_(false)
@@ -383,8 +385,8 @@ void CLDLTSolver::LDLT()
     else
         SparseK_ = BuildEigenSparseMatrix(*K_);
 
-    const unsigned int dimension = static_cast<unsigned int>(SparseK_.rows());
-    Transform_ = BuildConstraintTransform(dimension, MpcConstraints_, ReducedIndex_);
+    SparseDimension_ = static_cast<unsigned int>(SparseK_.rows());
+    Transform_ = BuildConstraintTransform(SparseDimension_, MpcConstraints_, ReducedIndex_);
     ReducedK_ = Transform_.transpose() * SparseK_ * Transform_;
     ReducedK_.makeCompressed();
 
@@ -435,6 +437,8 @@ void CLDLTSolver::LDLT()
 
         PardisoInitialized_ = true;
         Factorized_ = true;
+        Eigen::SparseMatrix<double>().swap(SparseK_);
+        Eigen::SparseMatrix<double>().swap(ReducedK_);
         cerr << "    Intel oneMKL PARDISO solver prepared."
              << " mtype=" << PardisoMtype_
              << " ooc=" << PardisoIparm_[59]
@@ -551,7 +555,7 @@ void CLDLTSolver::BackSubstitution(double* Force)
     if (!Factorized_)
         LDLT();
 
-    const unsigned int N = static_cast<unsigned int>(SparseK_.rows());
+    const unsigned int N = SparseDimension_;
     Eigen::VectorXd rhs(N);
     for (unsigned int i = 0; i < N; i++)
         rhs[i] = Force[i];
