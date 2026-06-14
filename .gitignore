@@ -23,3 +23,4 @@ cases/
 third_party/
 build_pardiso_check/
 build_pardiso/
+others/data_archive
