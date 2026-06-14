@@ -72,8 +72,8 @@ $env:MKL_NUM_THREADS = "1"
 $env:OMP_NUM_THREADS = "1"
 $env:MKL_DYNAMIC = "FALSE"
 $env:STAPPP_PARDISO_OOC = "1"
-$env:MKL_PARDISO_OOC_MAX_CORE_SIZE = "12000"
-$env:MKL_PARDISO_OOC_PATH = "."
+$env:MKL_PARDISO_OOC_MAX_CORE_SIZE = "300"
+$env:MKL_PARDISO_OOC_PATH = "data\conversion_timing\pardiso_ooc"
 
 build_pardiso\Release\stap++.exe data\data-3\Bridge-1.rcm.generated.dat
 build_pardiso\Release\stap++.exe data\data-3\Bridge-2.eigen_mpc.dat
@@ -85,8 +85,40 @@ If 1 thread is too slow, use the middle low-memory setting:
 $env:MKL_NUM_THREADS = "4"
 $env:OMP_NUM_THREADS = "4"
 $env:STAPPP_PARDISO_OOC = "1"
-$env:MKL_PARDISO_OOC_MAX_CORE_SIZE = "16000"
+$env:MKL_PARDISO_OOC_MAX_CORE_SIZE = "500"
 ```
+
+Measured local low-memory notes:
+
+```text
+Bridge-1: 12T in-core 60.3 MB, 1T OOC 100MB 56.2 MB
+Bridge-2: 12T in-core 831.6 MB, 1T OOC 300MB 559.5 MB
+Bridge-3: 12T in-core solve time 109.505 s; OOC caps 4000/6000/7000MB failed, 8000MB worked
+```
+
+Bridge-3 low-memory command:
+
+```powershell
+$env:MKL_NUM_THREADS = "1"
+$env:OMP_NUM_THREADS = "1"
+$env:MKL_DYNAMIC = "FALSE"
+$env:STAPPP_SOLVER = "pardiso"
+$env:STAPPP_PARDISO_OOC = "1"
+$env:MKL_PARDISO_OOC_MAX_CORE_SIZE = "8000"
+$env:MKL_PARDISO_OOC_PATH = "data\conversion_timing\pardiso_ooc"
+
+build_pardiso\Release\stap++.exe data\conversion_timing\Bridge-3.fast.rcm.dat
+```
+
+Measured local Bridge-3:
+
+```text
+4T in-core:       solve 113.194 s, peak 8718.5 MB, passed
+1T OOC 8000MB:   solve 231.832 s, peak 8298.7 MB, passed
+12T in-core:     solve 109.505 s passed earlier, but a later monitored run failed with PARDISO error -2
+```
+
+So Bridge-3 OOC 8000MB is mainly a fallback. It saves only about 420MB versus the successful 4T in-core run, while taking about twice as long.
 
 ## 5. Optional VTU Post-Processing
 

@@ -77,6 +77,7 @@ def ensure_dirs() -> None:
 
 def find_stappp() -> Path | None:
     candidates = [
+        ROOT / "build_pardiso/Release/stap++.exe",
         ROOT / "build_eigen_run/Release/stap++.exe",
         ROOT / "build_pardiso_check/Release/stap++.exe",
         ROOT / "build/Debug/stap++.exe",
@@ -304,15 +305,30 @@ def parse_plate4_convergence() -> Path | None:
     conv = pd.DataFrame(rows).sort_values("n")
     reference = float(conv.iloc[-1]["uz"])
     conv["abs_error_vs_finest"] = (conv["uz"] - reference).abs()
+    rate = estimate_convergence_rate(conv, "abs_error_vs_finest")
+    conv["estimated_order"] = rate
     conv.to_csv(OUT / "convergence" / "plate4_existing_convergence.csv", index=False)
 
-    plt.figure(figsize=(8.2, 5.2))
-    plt.plot(conv["n"], conv["uz"].abs(), marker="o", label="max |UZ|")
-    plt.xlabel("Mesh divisions per side")
-    plt.ylabel("Displacement magnitude")
-    plt.title("Plate4 existing convergence: cantilever gravity sequence")
-    plt.grid(True, alpha=0.28)
-    plt.legend()
+    fig, axes = plt.subplots(2, 1, figsize=(8.2, 6.2), sharex=True)
+    axes[0].plot(conv["n"], conv["uz"].abs(), marker="o", label="max |UZ|")
+    axes[0].set_ylabel("Displacement magnitude")
+    axes[0].set_title("Plate4 existing convergence: cantilever gravity sequence")
+    axes[0].grid(True, alpha=0.28)
+    axes[0].legend()
+    axes[1].plot(conv["n"], conv["abs_error_vs_finest"], marker="s", color="#cc6677")
+    axes[1].set_yscale("symlog", linthresh=1.0e-14)
+    axes[1].set_xlabel("Mesh divisions per side")
+    axes[1].set_ylabel("Abs error vs finest")
+    axes[1].grid(True, alpha=0.28)
+    if not np.isnan(rate):
+        axes[1].text(
+            0.04,
+            0.9,
+            f"fitted order p = {rate:.3g}",
+            transform=axes[1].transAxes,
+            fontsize=9,
+            bbox={"facecolor": "white", "alpha": 0.75, "edgecolor": "none"},
+        )
     path = OUT / "convergence" / "plate4_existing_convergence.png"
     savefig(path)
     return path
@@ -372,7 +388,14 @@ def generate_bar_convergence() -> Path | None:
         if df.empty:
             continue
         value = float(df[df["node"] == n + 1]["ux"].iloc[0])
-        rows.append({"n": n, "tip_ux": value, "relative_error": abs(value - exact) / exact})
+        rows.append(
+            {
+                "n": n,
+                "h": 1.0 / n,
+                "tip_ux": value,
+                "relative_error": abs(value - exact) / exact,
+            }
+        )
     return plot_generated_convergence(
         "bar", "Bar sine axial-load convergence against analytical tip UX", rows, "tip_ux"
     )
@@ -413,7 +436,14 @@ def generate_beam_convergence() -> Path | None:
         if df.empty:
             continue
         value = float(df[df["node"] == n + 1]["uz"].iloc[0])
-        rows.append({"n": n, "tip_uz": value, "relative_error": abs(value - exact) / abs(exact)})
+        rows.append(
+            {
+                "n": n,
+                "h": 1.0 / n,
+                "tip_uz": value,
+                "relative_error": abs(value - exact) / abs(exact),
+            }
+        )
     return plot_generated_convergence(
         "beam", "Beam3D2 distributed-load convergence against analytical tip UZ", rows, "tip_uz"
     )
@@ -471,7 +501,7 @@ def generate_h8_convergence(element: str, etype: int, title: str) -> Path | None
         if df.empty:
             continue
         value = float(df["uz"].min())
-        rows.append({"n": n, "max_downward_uz": value, "relative_error": np.nan})
+        rows.append({"n": n, "h": 1.0 / n, "max_downward_uz": value, "relative_error": np.nan})
     if len(rows) >= 2:
         reference = rows[-1]["max_downward_uz"]
         for row in rows:
@@ -487,6 +517,10 @@ def plot_generated_convergence(
     if len(rows) < 2:
         return None
     conv = pd.DataFrame(rows).sort_values("n")
+    if "h" not in conv.columns:
+        conv["h"] = 1.0 / conv["n"]
+    rate = estimate_convergence_rate(conv, "relative_error")
+    conv["estimated_order"] = rate
     csv_path = OUT / "convergence" / f"{element}_generated_convergence.csv"
     conv.to_csv(csv_path, index=False)
     fig, axes = plt.subplots(2, 1, figsize=(8.2, 6.2), sharex=True)
@@ -499,8 +533,73 @@ def plot_generated_convergence(
     axes[1].set_xlabel("Mesh divisions / elements along length")
     axes[1].set_ylabel("Relative error")
     axes[1].grid(True, alpha=0.28)
+    if not np.isnan(rate):
+        axes[1].text(
+            0.04,
+            0.9,
+            f"fitted order p = {rate:.3g}",
+            transform=axes[1].transAxes,
+            fontsize=9,
+            bbox={"facecolor": "white", "alpha": 0.75, "edgecolor": "none"},
+        )
     path = OUT / "convergence" / f"{element}_generated_convergence.png"
     savefig(path)
+    return path
+
+
+def estimate_convergence_rate(conv: pd.DataFrame, error_column: str) -> float:
+    if "h" in conv:
+        h = conv["h"].astype(float)
+    elif "n" in conv:
+        h = 1.0 / conv["n"].astype(float)
+    else:
+        return float("nan")
+    error = conv[error_column].astype(float).abs()
+    mask = np.isfinite(h) & np.isfinite(error) & (h > 0.0) & (error > 0.0)
+    if int(mask.sum()) < 2:
+        return float("nan")
+    coeff = np.polyfit(np.log(h[mask]), np.log(error[mask]), 1)
+    return float(coeff[0])
+
+
+def write_convergence_rate_summary() -> Path | None:
+    specs = [
+        ("Bar", OUT / "convergence" / "bar_generated_convergence.csv", "relative_error"),
+        ("Beam3D2", OUT / "convergence" / "beam_generated_convergence.csv", "relative_error"),
+        ("Plate4", OUT / "convergence" / "plate4_existing_convergence.csv", "abs_error_vs_finest"),
+        ("Hex8", OUT / "convergence" / "hex8_generated_convergence.csv", "relative_error"),
+        ("BbarHex8", OUT / "convergence" / "bbarhex8_generated_convergence.csv", "relative_error"),
+    ]
+    rows = []
+    for element, path, error_column in specs:
+        if not path.exists():
+            continue
+        conv = pd.read_csv(path)
+        if error_column not in conv:
+            continue
+        if "h" not in conv and "n" in conv:
+            conv["h"] = 1.0 / conv["n"]
+        rate = estimate_convergence_rate(conv, error_column)
+        usable = conv[
+            np.isfinite(conv["h"].astype(float))
+            & np.isfinite(conv[error_column].astype(float))
+            & (conv["h"].astype(float) > 0.0)
+            & (conv[error_column].astype(float).abs() > 0.0)
+        ]
+        rows.append(
+            {
+                "element": element,
+                "error_column": error_column,
+                "fit_points": len(usable),
+                "fitted_order": rate,
+                "source_csv": str(path.relative_to(ROOT)),
+            }
+        )
+    if not rows:
+        return None
+    summary = pd.DataFrame(rows)
+    path = OUT / "convergence" / "convergence_rate_summary.csv"
+    summary.to_csv(path, index=False)
     return path
 
 
@@ -530,18 +629,37 @@ def read_vtu_arrays(path: Path) -> dict[str, np.ndarray]:
 
 
 def generate_patch_numeric_summary() -> Path | None:
-    vtu_cases = [
-        ("Bar", ROOT / "cases/patch_test_paraview/subdivided_vtu/bar_patch_6_segments.vtu", "SXX", 1.0),
-        ("Beam3D2", ROOT / "cases/patch_test_paraview/subdivided_vtu/beam_patch_6_segments.vtu", "AxialForce", 1.0),
-        ("Plate4", ROOT / "cases/patch_test_paraview/subdivided_vtu/plate4_patch_3x3.vtu", "SXX", 1.0e5),
-        ("Hex8", ROOT / "cases/patch_test_paraview/subdivided_vtu/hex8_patch_2x2x2.vtu", "SXX", 1.0),
-        ("BbarHex8", ROOT / "cases/patch_test_paraview/subdivided_vtu/bbarhex8_patch_2x2x2.vtu", "SXX", 1.0),
+    vtu_dir = ROOT / "cases/patch_test_paraview/subdivided_vtu"
+    patch_cases = [
+        ("Bar", "bar_patch_6_segments", "SXX", 1.0),
+        ("Beam3D2", "beam_patch_6_segments", "AxialForce", 1.0),
+        ("Plate4", "plate4_patch_3x3", "SXX", 1.0e5),
+        ("Hex8", "hex8_patch_2x2x2", "SXX", 1.0),
+        ("BbarHex8", "bbarhex8_patch_2x2x2", "SXX", 1.0),
+    ]
+    trial_cases = [
+        (
+            "type1_all_node_displacement",
+            "all_node_displacement_markers",
+            "prescribed displacement on every node",
+        ),
+        (
+            "type2_boundary_displacement",
+            "boundary_displacement_markers",
+            "prescribed displacement on boundary nodes",
+        ),
+        (
+            "type3_equivalent_force_boundary",
+            "equivalent_force_boundary_markers",
+            "equivalent force boundary condition",
+        ),
     ]
     rows = []
-    for element, path, stress_name, expected_stress in vtu_cases:
-        if not path.exists():
+    for element, stem, stress_name, expected_stress in patch_cases:
+        base_path = vtu_dir / f"{stem}.vtu"
+        if not base_path.exists():
             continue
-        arrays = read_vtu_arrays(path)
+        arrays = read_vtu_arrays(base_path)
         points = arrays.get("Points")
         ux = arrays.get("UX")
         stress = arrays.get(stress_name)
@@ -552,44 +670,106 @@ def generate_patch_numeric_summary() -> Path | None:
         predicted = np.polyval(coeff, x)
         max_abs_ux_error = float(np.max(np.abs(ux - predicted)))
         ux_scale = max(float(np.max(np.abs(ux))), 1.0e-14)
-        row = {
-            "element": element,
-            "nodes": len(points),
-            "ux_slope": float(coeff[0]),
-            "ux_intercept": float(coeff[1]),
-            "max_abs_ux_fit_error": max_abs_ux_error,
-            "max_rel_ux_fit_error": max_abs_ux_error / ux_scale,
-            "stress_quantity": stress_name,
-            "expected_stress": expected_stress,
-            "stress_mean": np.nan,
-            "stress_std": np.nan,
-            "stress_max_abs_error": np.nan,
-        }
+
+        stress_mean = np.nan
+        stress_std = np.nan
+        stress_max_abs_error = np.nan
         if stress is not None and len(stress):
             stress = np.asarray(stress, dtype=float)
-            row["stress_mean"] = float(np.mean(stress))
-            row["stress_std"] = float(np.std(stress))
-            row["stress_max_abs_error"] = float(np.max(np.abs(stress - expected_stress)))
-        rows.append(row)
+            stress_mean = float(np.mean(stress))
+            stress_std = float(np.std(stress))
+            stress_max_abs_error = float(np.max(np.abs(stress - expected_stress)))
+
+        for trial_id, marker_suffix, trial_label in trial_cases:
+            marker_path = vtu_dir / f"{stem}_{marker_suffix}.vtu"
+            marker_arrays = read_vtu_arrays(marker_path) if marker_path.exists() else {}
+            marker_points = marker_arrays.get("Points")
+            rows.append(
+                {
+                    "element": element,
+                    "trial": trial_id,
+                    "trial_label": trial_label,
+                    "mesh_nodes": len(points),
+                    "marker_nodes": 0 if marker_points is None else len(marker_points),
+                    "ux_slope": float(coeff[0]),
+                    "ux_intercept": float(coeff[1]),
+                    "max_abs_ux_fit_error": max_abs_ux_error,
+                    "max_rel_ux_fit_error": max_abs_ux_error / ux_scale,
+                    "stress_quantity": stress_name,
+                    "expected_stress": expected_stress,
+                    "stress_mean": stress_mean,
+                    "stress_std": stress_std,
+                    "stress_max_abs_error": stress_max_abs_error,
+                    "passes_linear_ux": max_abs_ux_error <= 1.0e-12,
+                    "passes_constant_stress": bool(
+                        np.isnan(stress_std) or stress_std <= max(abs(expected_stress), 1.0) * 1.0e-12
+                    ),
+                    "source_vtu": str(base_path.relative_to(ROOT)),
+                    "marker_vtu": (
+                        str(marker_path.relative_to(ROOT)) if marker_path.exists() else ""
+                    ),
+                }
+            )
     if not rows:
         return None
     summary = pd.DataFrame(rows)
     csv_path = OUT / "patch" / "patch_numeric_summary.csv"
     summary.to_csv(csv_path, index=False)
 
-    fig, axes = plt.subplots(2, 1, figsize=(9.0, 6.8))
+    element_summary = (
+        summary.groupby("element", as_index=False)
+        .agg(
+            mesh_nodes=("mesh_nodes", "first"),
+            max_marker_nodes=("marker_nodes", "max"),
+            max_abs_ux_fit_error=("max_abs_ux_fit_error", "max"),
+            max_rel_ux_fit_error=("max_rel_ux_fit_error", "max"),
+            stress_quantity=("stress_quantity", "first"),
+            expected_stress=("expected_stress", "first"),
+            stress_mean=("stress_mean", "first"),
+            stress_std=("stress_std", "max"),
+            stress_max_abs_error=("stress_max_abs_error", "max"),
+            all_linear_ux_pass=("passes_linear_ux", "all"),
+            all_constant_stress_pass=("passes_constant_stress", "all"),
+        )
+        .sort_values("element")
+    )
+    element_summary.to_csv(OUT / "patch" / "patch_numeric_element_summary.csv", index=False)
+
+    pivot = summary.pivot(
+        index="element", columns="trial", values="max_abs_ux_fit_error"
+    ).reset_index()
+    pivot.to_csv(OUT / "patch" / "patch_numeric_error_pivot.csv", index=False)
+
+    labels = [f"{row.element}\n{row.trial.split('_')[0]}" for row in summary.itertuples()]
     x = np.arange(len(summary))
+    fig, axes = plt.subplots(3, 1, figsize=(10.8, 8.8), sharex=True)
     axes[0].bar(x, summary["max_abs_ux_fit_error"], color="#4477aa")
     axes[0].set_yscale("symlog", linthresh=1.0e-18)
     axes[0].set_ylabel("Max |UX - linear fit|")
-    axes[0].set_title("Patch-test numerical summary")
+    axes[0].set_title("Patch-test numerical summary by boundary form")
     axes[0].grid(True, axis="y", alpha=0.28)
-    axes[1].bar(x, summary["stress_std"].fillna(0.0), color="#228833")
-    axes[1].set_yscale("symlog", linthresh=1.0e-18)
-    axes[1].set_ylabel("Stress/force standard deviation")
-    axes[1].set_xticks(x)
-    axes[1].set_xticklabels(summary["element"], rotation=15, ha="right")
+    stress_pass = summary["passes_constant_stress"].astype(float)
+    colors = ["#228833" if passed else "#cc6677" for passed in summary["passes_constant_stress"]]
+    axes[1].bar(x, stress_pass, color=colors)
+    axes[1].set_ylim(0.0, 1.15)
+    axes[1].set_yticks([0.0, 1.0])
+    axes[1].set_yticklabels(["fail", "pass"])
+    axes[1].set_ylabel("Constant stress/force check")
     axes[1].grid(True, axis="y", alpha=0.28)
+    max_stress_std = float(summary["stress_std"].fillna(0.0).max())
+    axes[1].text(
+        0.02,
+        0.88,
+        f"max std = {max_stress_std:.3g}",
+        transform=axes[1].transAxes,
+        fontsize=9,
+        bbox={"facecolor": "white", "alpha": 0.75, "edgecolor": "none"},
+    )
+    axes[2].bar(x, summary["marker_nodes"], color="#cc6677")
+    axes[2].set_ylabel("Marked boundary nodes")
+    axes[2].set_xticks(x)
+    axes[2].set_xticklabels(labels, rotation=35, ha="right")
+    axes[2].grid(True, axis="y", alpha=0.28)
     path = OUT / "patch" / "patch_numeric_summary.png"
     savefig(path)
     return path
@@ -701,6 +881,9 @@ def main() -> None:
     for element, path in generated_convergence:
         if path:
             rendered.setdefault(f"{element}:convergence", []).append(path)
+    rate_summary = write_convergence_rate_summary()
+    if rate_summary:
+        rendered.setdefault("convergence:rate_summary", []).append(rate_summary)
 
     coverage_csv = build_coverage(rendered)
     write_index(rendered, coverage_csv)
